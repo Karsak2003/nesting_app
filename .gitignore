@@ -8,3 +8,4 @@ test.patch
 /.vscode
 /results
 4run.txt
+.pyc
