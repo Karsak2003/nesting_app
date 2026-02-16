@@ -1,0 +1,9 @@
+/.venv
+Anaconda3-2025.12-1-Windows-x86_64.exe
+nesting_app.pyproj
+nesting_app.sln
+test.patch
+/pythonocc-core-7.9.0
+/logs
+/.vscode
+/results

@@ -1,0 +1,1 @@
+C:\Users\Karim\anaconda3\envs\Env_nesting_app\python.exe C:\Users\Karim\Desktop\nesting_app\main.py --input C:\Users\Karim\Desktop\Chertezh_1.dxf
