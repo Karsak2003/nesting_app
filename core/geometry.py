@@ -24,7 +24,7 @@ class PolygonShape:
         self.outer_contour:np.ndarray = np.array(outer_contour)
         self.inner_contours:list[np.ndarray] = [np.array(contour) for contour in inner_contours] if inner_contours else []
         self.priority:int = priority
-        self.allowed_angles:float = 0.0
+        self.allowed_angles:list = []
         self.update_geometry()
 
         

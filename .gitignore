@@ -27,3 +27,4 @@ my_io/__pycache__/step_import.cpython-311.pyc
 utils/__pycache__/bvh.cpython-311.pyc
 utils/__pycache__/polygonization.cpython-311.pyc
 utils/__pycache__/sdf.cpython-311.pyc
+.gitignore
