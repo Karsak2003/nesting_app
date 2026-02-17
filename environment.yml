@@ -1,0 +1,20 @@
+name: iagi_env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - numpy
+  - scipy
+  - matplotlib
+  - shapely
+  - rtree
+  - pyyaml
+  - tqdm
+  - pyqt=5
+  - ezdxf
+  - oce
+  - swig
+  - pip
+  - pip:
+    - pythonocc-core==7.7.0
