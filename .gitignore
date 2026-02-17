@@ -3,6 +3,7 @@
 *.log
 *.tmp
 *.swp
+/logs
 
 # Environment
 .env

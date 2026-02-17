@@ -6,9 +6,13 @@ from core.geometry import PolygonShape
 from core.agent import IAGIAgent
 from core.collision import CollisionDetector
 from core.dynamics import GravitationalDynamics
+from core.sheet_batch import Sheet, SheetBatchManager
 from algorithms.stabilization import apply_stabilization
 from algorithms.sequential import sequential_placement
 from algorithms.parallel import parallel_placement
+
+
+from typing import List, Dict, Tuple, Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +210,35 @@ class PackingOptimizer:
         print(f"  Эффективная площадь: {effective_area:.2f} мм²")
         
         return self.result
+    
+    def optimize_batch(self,
+                  parts: List[Any],
+                  sheet_batch: SheetBatchManager,
+                  priorities: Optional[List[int]] = None,
+                  orientation_constraints: Optional[List[Any]] = None) -> Dict[str, Any]:
+        """
+        Оптимизация раскроя партии деталей по нескольким листам
+        
+        :param parts: Список деталей для раскроя
+        :param sheet_batch: Менеджер партии листов
+        :param priorities: Приоритеты деталей
+        :param orientation_constraints: Ограничения на ориентацию
+        :return: Результаты оптимизации по всем листам
+        """
+        from algorithms.batch_coordinator import BatchNestingCoordinator
+        
+        coordinator = BatchNestingCoordinator(
+            sheet_batch=sheet_batch,
+            constraint_manager=self.constraint_manager,
+            distribution_method='hybrid_ga',
+            time_limit=self.time_limit
+        )
+        
+        return coordinator.coordinate_batch_nesting(
+            parts=parts,
+            priorities=priorities,
+            orientation_constraints=orientation_constraints
+        )
     
     def get_final_positions(self):
         """

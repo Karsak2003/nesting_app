@@ -28,14 +28,27 @@ IAGI — это система оптимизации раскроя плоск�
 Для установки зависимостей выполните:
 
 ```bash
-pip install -r requirements.txt
+conda env create -f environment.yml
+conda activate iagi_env
 ```
+
+## Используемые пакеты
+Проект использует следующие сторонние пакеты:
+
+- **OpenCASCADE** — библиотека для работы с геометрическими объектами
+- **PythonOCC** — Python-обертка для OpenCASCADE
+- **NumPy** — вычисления с массивами данных
+- **SciPy** — научные вычисления
+- **Matplotlib** — визуализация данных
+- **Shapely** — операции с геометрическими фигурами
+- **GDAL/OGR** — обработка геометрических данных из файлов
 
 ## Использование
 
 Запуск системы:
 
 ```bash
+conda activate iagi_env
 python main.py
 ```
 
