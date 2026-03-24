@@ -125,9 +125,16 @@ class PackingOptimizer:
         logger.info(f"Подготовка завершена: создано {len(self.agents)} агентов")
         return self.agents
     
-    def optimize(self, shapes, priorities=None, orientation_constraints=None, use_original_positions=True):
+    def optimize(self, shapes, priorities=None, orientation_constraints=None, use_original_positions=True, progress_callback=None):
         """
         Основной метод оптимизации раскроя
+        
+        Args:
+            shapes: список фигур для размещения
+            priorities: приоритеты фигур (опционально)
+            orientation_constraints: ограничения ориентации (опционально)
+            use_original_positions: использовать исходные позиции из файла
+            progress_callback: функция обратного вызова для обновления прогресса (progress, agents, utilization)
         """
         start_time = time.time()
         
@@ -154,7 +161,8 @@ class PackingOptimizer:
                 self.dynamics,
                 self.min_gap,
                 self.defect_zones,
-                time_limit=self.time_limit
+                time_limit=self.time_limit,
+                progress_callback=progress_callback
             )
         else:
             self.result = parallel_placement(
@@ -164,7 +172,8 @@ class PackingOptimizer:
                 self.dynamics,
                 self.min_gap,
                 self.defect_zones,
-                time_limit=self.time_limit
+                time_limit=self.time_limit,
+                progress_callback=progress_callback
             )
         
         # Применение механизмов стабилизации при необходимости

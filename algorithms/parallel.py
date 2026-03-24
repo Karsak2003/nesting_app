@@ -17,7 +17,8 @@ def parallel_placement(
     defect_zones: Optional[List[PolygonShape]] = None,
     time_limit: float = 300.0,
     energy_threshold: float = 0.1,
-    stagnation_steps: int = 50
+    stagnation_steps: int = 50,
+    progress_callback=None
 ) -> List[IAGIAgent]:
     """
     Параллельный алгоритм размещения на основе ИАГИ
@@ -31,6 +32,7 @@ def parallel_placement(
     :param time_limit: Максимальное время работы алгоритма (секунды)
     :param energy_threshold: Порог сходимости по энергии
     :param stagnation_steps: Количество шагов для обнаружения стагнации
+    :param progress_callback: функция обратного вызова (progress, agents, utilization)
     :return: Список агентов с финальными позициями
     """
     start_time = time.time()
@@ -161,13 +163,19 @@ def parallel_placement(
         if not collision_detected and max_velocity < 0.5 and max_movement < 0.1:
             stable = True
         
-        # 6. Логирование прогресса
+        # 6. Логирование прогресса и вызов callback
         if iteration % 20 == 0:
             elapsed = time.time() - start_time
             utilization = calculate_material_utilization(agents, sheet_size)
             print(f"Итерация {iteration}: энергия={total_energy:.2f}, "
                   f"max_vel={max_velocity:.2f}, утилизация={utilization:.2f}%, "
                   f"время={elapsed:.1f}/{time_limit:.0f}с")
+            
+            # Вызов callback для обновления прогресса
+            if progress_callback:
+                # Расчет прогресса на основе времени
+                progress = min(int((elapsed / time_limit) * 100), 95)
+                progress_callback(progress, agents, utilization)
 
         # 7. Экстренная остановка при превышении времени
         if (time.time() - start_time) > time_limit:
@@ -183,6 +191,10 @@ def parallel_placement(
     print(f"\nПараллельное размещение завершено за {elapsed_time:.2f} секунд")
     print(f"Финальная утилизация материала: {final_utilization:.2f}%")
     print(f"Количество итераций: {iteration}")
+    
+    # Финальный вызов callback
+    if progress_callback:
+        progress_callback(100, agents, final_utilization)
     
     return agents
 

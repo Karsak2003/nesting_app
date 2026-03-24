@@ -5,9 +5,19 @@ import logging
 logger = logging.getLogger(__name__)
 
 def sequential_placement(agents, sheet_size, collision_detector, dynamics, min_gap, 
-                         defect_zones=None, time_limit=600):
+                         defect_zones=None, time_limit=600, progress_callback=None):
     """
     Последовательный алгоритм размещения с учетом приоритетов
+    
+    Args:
+        agents: список агентов для размещения
+        sheet_size: размеры листа (width, height)
+        collision_detector: детектор столкновений
+        dynamics: физическая модель динамики
+        min_gap: минимальный зазор между фигурами
+        defect_zones: список дефектных зон
+        time_limit: лимит времени выполнения в секундах
+        progress_callback: функция обратного вызова (progress, agents, utilization)
     """
     if defect_zones is None:
         defect_zones = []
@@ -19,6 +29,9 @@ def sequential_placement(agents, sheet_size, collision_detector, dynamics, min_g
     priority_groups = {}
     for agent in sorted_agents:
         priority_groups.setdefault(agent.priority, []).append(agent)
+    
+    total_groups = len(priority_groups)
+    completed_groups = 0
     
     # Обработка каждой группы приоритетов
     for priority in sorted(priority_groups.keys(), reverse=True):
@@ -120,15 +133,34 @@ def sequential_placement(agents, sheet_size, collision_detector, dynamics, min_g
             if iteration % 20 == 0:
                 print(f"  Итерация {iteration}, max_velocity={max_velocity:.2f} мм/с")
                 
+                # Вызов callback для обновления прогресса
+                if progress_callback:
+                    # Расчет текущего прогресса и утилизации
+                    progress = int((completed_groups + (iteration / max_iterations)) / total_groups * 100)
+                    total_area = sum(a.shape.area for a in agents)
+                    max_y = max(a.get_transformed_shape().get_bounding_box()[3] for a in agents)
+                    effective_area = sheet_size[0] * max_y if max_y > 0 else total_area
+                    utilization = (total_area / effective_area) * 100 if effective_area > 0 else 0.0
+                    progress_callback(progress, agents, utilization)
+                
             # Проверка стабилизации группы
             if stable or max_velocity < 0.5:
                 print(f"  Группа приоритета {priority} стабилизирована за {iteration} итераций")
                 # Замораживаем агентов этой группы
                 for agent in group:
                     agent.is_frozen = True
+                completed_groups += 1
                 break
     
     elapsed_time = time.time() - start_time
     print(f"Последовательное размещение завершено за {elapsed_time:.2f} секунд")
+    
+    # Финальный вызов callback
+    if progress_callback:
+        total_area = sum(a.shape.area for a in agents)
+        max_y = max(a.get_transformed_shape().get_bounding_box()[3] for a in agents)
+        effective_area = sheet_size[0] * max_y if max_y > 0 else total_area
+        utilization = (total_area / effective_area) * 100 if effective_area > 0 else 0.0
+        progress_callback(100, agents, utilization)
 
     return agents
