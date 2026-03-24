@@ -21,12 +21,6 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSize, QUrl
 from PyQt5.QtGui import QColor, QPalette, QLinearGradient, QBrush, QPainter, QPen, QPolygonF, QFont
 
-# Добавляем корень проекта в путь импорта
-sys.path.append(str(Path(__file__).parent.parent))
-
-from core.geometry import PolygonShape
-from config.settings import get_config
-
 
 class ServerConnectionDialog(QDialog):
     """Диалог настройки подключения к серверу"""
@@ -256,7 +250,6 @@ class ControlPanel(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.config = get_config()
         self.current_profile = 'medium_precision'
         self.placement_mode = 'sequential'
         self.technology = 'laser'
@@ -665,7 +658,10 @@ class MainWindow(QMainWindow):
         self.log_message(f"Оптимизация завершена: {status.get('message', '')}")
         self.control_panel.enable_export(True)
         self.control_panel.stop_button.setEnabled(False)
-        self.statusBar().showMessage(f"Оптимизация завершена. Использование: {status.get('utilization', 0):.1f}%")
+        utilization = status.get('utilization') if status else 0
+        if utilization is None:
+            utilization = 0
+        self.statusBar().showMessage(f"Оптимизация завершена. Использование: {utilization:.1f}%")
     
     def on_optimization_error(self, error: str):
         self.log_message(f"Ошибка: {error}")
