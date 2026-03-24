@@ -3,10 +3,11 @@
 ИАГИ - Интеллектуальный агент гравитационной имитации для раскроя плоских деталей
 ===================================================================================
 
-Точка входа в приложение. Поддерживает:
+Единая точка входа для запуска приложения в различных режимах:
 - Консольный режим для автоматической обработки
-- Графический интерфейс для визуализации и ручного управления
-- Пакетную обработку наборов данных
+- Графический интерфейс (legacy GUI) для визуализации и ручного управления
+- Клиент-серверная архитектура (FastAPI + PyQt5)
+- Пакетная обработка наборов данных
 - Интеграцию с промышленными CAD/CAM-системами
 
 Разработано в соответствии с требованиями глав 2-3 диссертации:
@@ -27,9 +28,9 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any
 
 # Настройка путей для импорта модулей
-sys.path.append(str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent / 'server'))
 
-# Основные компоненты системы
+# Основные компоненты системы (из server/)
 from core.geometry import PolygonShape
 from core.optimizer import PackingOptimizer
 from core.constraints import ConstraintManager
@@ -40,13 +41,21 @@ from my_io.exporter import export_results
 from algorithms.hybrid import hybrid_optimization_factory
 from utils.polygonization import AdaptivePolygonizer
 
-# Графический интерфейс (опционально)
+# Графический интерфейс (опционально) - legacy GUI
 try:
     from gui.interface import main as gui_main
     GUI_AVAILABLE = True
 except ImportError as e:
-    logging.warning(f"Графический интерфейс недоступен: {e}")
+    logging.warning(f"Графический интерфейс (legacy) недоступен: {e}")
     GUI_AVAILABLE = False
+
+# Клиент-серверные компоненты (опционально)
+try:
+    from client.main import run_server, run_client, run_both
+    CLIENT_SERVER_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Клиент-серверные компоненты недоступны: {e}")
+    CLIENT_SERVER_AVAILABLE = False
 
 # Настройка логирования
 def setup_logging(log_level: str = 'INFO', log_file: str = 'logs/app.log'):
@@ -447,13 +456,50 @@ def create_test_data(num_shapes: int = 10) -> List[PolygonShape]:
 
 def main():
     """Основная точка входа приложения"""
-    parser = argparse.ArgumentParser(description='ИАГИ - Система раскроя плоских деталей на основе интеллектуальных агентов гравитационной имитации')
+    parser = argparse.ArgumentParser(
+        description='ИАГИ - Система раскроя плоских деталей на основе интеллектуальных агентов гравитационной имитации',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Примеры использования:
+  # Консольный режим (локальная оптимизация)
+  python main.py --input parts.dxf --output results
+  
+  # Legacy GUI (старый графический интерфейс)
+  python main.py --gui
+  
+  # Клиент-серверный режим (новая архитектура)
+  python main.py --server              # Только сервер FastAPI
+  python main.py --client              # Только клиент PyQt5
+  python main.py --both                # Сервер и клиент вместе
+  
+  # Расширенные настройки сервера
+  python main.py --server --host 0.0.0.0 --port 8080
+  
+  # Расширенные настройки клиента
+  python main.py --client --url http://192.168.1.100:8000 --theme dark
+  
+  # Пакетная обработка
+  python main.py --batch config.json
+  
+  # Тестовый запуск
+  python main.py --test --num_shapes 20
+        """
+    )
     
-    # Режимы работы
+    # Режимы работы - основные
     mode_group = parser.add_argument_group('Режимы работы')
-    mode_group.add_argument('--gui', action='store_true', help='Запустить графический интерфейс')
+    mode_group.add_argument('--gui', action='store_true', help='Запустить legacy графический интерфейс (gui/interface.py)')
     mode_group.add_argument('--batch', type=str, metavar='CONFIG_FILE', help='Запустить пакетную обработку из JSON конфигурации')
     mode_group.add_argument('--test', action='store_true', help='Запустить на тестовых данных')
+    
+    # Режимы работы - клиент-сервер
+    cs_mode_group = parser.add_argument_group('Клиент-серверные режимы (новая архитектура)')
+    cs_mode_group.add_argument('--server', action='store_true',
+                               help='Запустить только серверную часть (FastAPI)')
+    cs_mode_group.add_argument('--client', action='store_true',
+                               help='Запустить только клиентскую часть (PyQt5)')
+    cs_mode_group.add_argument('--both', action='store_true',
+                               help='Запустить обе части одновременно')
     
     # Параметры для консольного режима
     console_group = parser.add_argument_group('Параметры консольного режима')
@@ -469,6 +515,23 @@ def main():
     console_group.add_argument('--visualize', action='store_true', help='Визуализировать результат')
     console_group.add_argument('--optimize-positions', action='store_true', 
                               help='Оптимизировать размещение фигур (по умолчанию используются исходные позиции из DXF)')
+    
+    # Настройки сервера
+    server_group = parser.add_argument_group('Настройки сервера')
+    server_group.add_argument('--host', type=str, default='0.0.0.0',
+                             help='Хост для сервера (по умолчанию: 0.0.0.0)')
+    server_group.add_argument('--port', type=int, default=8000,
+                             help='Порт для сервера (по умолчанию: 8000)')
+    server_group.add_argument('--reload', action='store_true',
+                             help='Включить автоперезагрузку сервера (для разработки)')
+    
+    # Настройки клиента
+    client_group = parser.add_argument_group('Настройки клиента')
+    client_group.add_argument('--url', type=str, default=None,
+                             help='URL сервера для клиента (по умолчанию: http://localhost:8000)')
+    client_group.add_argument('--theme', type=str, choices=['system', 'light', 'dark'],
+                             default='system',
+                             help='Цветовая тема интерфейса (по умолчанию: system)')
     
     # Тестовые параметры
     test_group = parser.add_argument_group('Параметры тестового режима')
@@ -491,13 +554,32 @@ def main():
         logger.info(f"Версия: 1.0")
         logger.info(f"Текущее время: {time.strftime('%Y-%m-%d %H:%M:%S')}")
         
-        # Режим графического интерфейса
+        # Проверка доступности клиент-серверных компонентов
+        if (args.server or args.client or args.both) and not CLIENT_SERVER_AVAILABLE:
+            logger.error("Клиент-серверные компоненты недоступны. Установите зависимости: fastapi, uvicorn, PyQt5, matplotlib")
+            return 1
+        
+        # Клиент-серверные режимы (приоритет)
+        if args.both:
+            logger.info("Запуск сервера и клиента одновременно...")
+            run_both(host=args.host, port=args.port, theme=args.theme)
+            return 0
+        elif args.server:
+            logger.info(f"Запуск сервера на {args.host}:{args.port}...")
+            run_server(host=args.host, port=args.port, reload=args.reload)
+            return 0
+        elif args.client:
+            logger.info("Запуск клиента...")
+            run_client(server_url=args.url, theme=args.theme)
+            return 0
+        
+        # Режим графического интерфейса (legacy)
         if args.gui:
             if not GUI_AVAILABLE:
-                logger.error("Графический интерфейс недоступен. Проверьте установку зависимостей PyQt5.")
+                logger.error("Графический интерфейс (legacy) недоступен. Проверьте установку зависимостей PyQt5.")
                 return 1
             
-            logger.info("Запуск графического интерфейса...")
+            logger.info("Запуск legacy графического интерфейса...")
             return gui_main()
         
         # Режим пакетной обработки

@@ -1,1 +1,16 @@
-Nothing should be ignored in this case, as the changes only include Python source files (.py) which are not build artifacts, dependencies, or temporary files.
+```
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+*.env.*
+```
