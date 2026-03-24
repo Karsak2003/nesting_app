@@ -10,6 +10,8 @@ import json
 import logging
 import tempfile
 import shutil
+import uuid
+import threading
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any
 from contextlib import asynccontextmanager
@@ -18,23 +20,25 @@ import numpy as np
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel, Field
+import uvicorn
 
 # Добавляем корень проекта в путь импорта
-sys.path.append(str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent))
 
-from core.geometry import PolygonShape
-from core.optimizer import PackingOptimizer
-from core.constraints import ConstraintManager
-from config.settings import get_config, load_profile
-from my_io.dxf_import import import_dxf
-from my_io.step_import import import_step
-from my_io.exporter import export_results
-from algorithms.hybrid import hybrid_optimization_factory
+# Импорт локальных модулей
+from app import (
+    PolygonShape, PackingOptimizer, ConstraintManager,
+    import_dxf, import_step, export_results, get_config, load_profile
+)
 
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(Path(__file__).parent / 'server.log')
+    ]
 )
 logger = logging.getLogger('IAGI-Server')
 
@@ -349,22 +353,11 @@ async def start_optimization(
         constraint_manager.set_technology(request.technology)
         
         # Запуск фонового задания
-        from fastapi.background import BackgroundTasks
-        background_tasks = BackgroundTasks()
-        background_tasks.add_task(
-            run_optimization_task,
-            task_id,
-            shapes,
-            request,
-            constraint_manager
-        )
-        
-        # Для простоты запускаем задачу немедленно (в реальном приложении использовать Celery)
-        import threading
         thread = threading.Thread(
             target=run_optimization_task,
             args=(task_id, shapes, request, constraint_manager)
         )
+        thread.daemon = True
         thread.start()
         
         return OptimizationResponse(
@@ -427,10 +420,9 @@ async def download_result(task_id: str, format: str):
     )
 
 
-@app.post("/api/shapes/info")
+@app.get("/api/shapes/info")
 async def get_shapes_info(file: UploadFile = File(...)):
     """Получение информации о фигурах в файле"""
-    import uuid
     
     temp_id = str(uuid.uuid4())
     file_path = TEMP_DIR / f"{temp_id}_{file.filename}"
@@ -445,12 +437,12 @@ async def get_shapes_info(file: UploadFile = File(...)):
         shape_infos = []
         for shape in shapes:
             bbox = shape.get_bounding_box()
-            shape_infos.append(ShapeInfo(
-                name=getattr(shape, 'name', 'unknown'),
-                area=shape.area,
-                priority=getattr(shape, 'priority', None),
-                bounding_box=bbox
-            ))
+            shape_infos.append({
+                "name": getattr(shape, 'name', 'unknown'),
+                "area": shape.area,
+                "priority": getattr(shape, 'priority', None),
+                "bounding_box": bbox
+            })
         
         return {
             "filename": file.filename,
@@ -463,6 +455,12 @@ async def get_shapes_info(file: UploadFile = File(...)):
     finally:
         if file_path.exists():
             file_path.unlink()
+
+
+@app.post("/api/shapes/info")
+async def post_shapes_info(file: UploadFile = File(...)):
+    """POST версия для получения информации о фигурах (совместимость)"""
+    return await get_shapes_info(file)
 
 
 @app.get("/api/profiles")
