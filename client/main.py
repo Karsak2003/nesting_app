@@ -1,797 +1,153 @@
 """
-Клиентская часть приложения ИАГИ на PyQt5 с HTTP-клиентом
-Подключается к серверу FastAPI для выполнения оптимизации раскроя
+Единая точка входа для запуска клиентской или серверной части ИАГИ
+Или обеих частей одновременно через парсер аргументов
 """
 
 import sys
-import time
-import threading
-import json
+import argparse
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-
-import numpy as np
-import requests
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QPushButton, QComboBox, QLabel, QSlider, QSpinBox, QDoubleSpinBox,
-                             QGroupBox, QTabWidget, QFileDialog, QProgressBar, QMessageBox,
-                             QTextEdit, QSplitter, QCheckBox, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QDialog, QFormLayout, QDialogButtonBox, QLineEdit,
-                             QRadioButton, QButtonGroup, QMenu, QAction)
-from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSize, QUrl, QSettings
-from PyQt5.QtGui import QColor, QPalette, QLinearGradient, QBrush, QPainter, QPen, QPolygonF, QFont
-
-from themes import get_palette, generate_stylesheet, get_system_theme
 
 
-class ServerConnectionDialog(QDialog):
-    """Диалог настройки подключения к серверу"""
+def run_server(host: str = "0.0.0.0", port: int = 8000, reload: bool = False):
+    """Запуск серверной части FastAPI"""
+    print(f"🚀 Запуск сервера ИАГИ на {host}:{port}")
     
-    def __init__(self, parent=None, current_url: str = "http://localhost:8000", current_theme: str = "system"):
-        super().__init__(parent)
-        self.setWindowTitle("Настройка подключения к серверу")
-        self.setModal(True)
-        self.setMinimumWidth(400)
+    try:
+        import uvicorn
+        from server.main import app
         
-        self.current_url = current_url
-        self.current_theme = current_theme
-        self.init_ui()
-    
-    def init_ui(self):
-        layout = QVBoxLayout()
-        
-        # Группа настроек подключения
-        conn_group = QGroupBox("Параметры подключения")
-        conn_layout = QFormLayout()
-        
-        # Адрес сервера
-        self.server_edit = QLineEdit()
-        self.server_edit.setText(self.current_url)
-        self.server_edit.setPlaceholderText("http://localhost:8000")
-        conn_layout.addRow("Адрес сервера:", self.server_edit)
-        
-        # Быстрые пресеты
-        preset_layout = QHBoxLayout()
-        self.local_radio = QRadioButton("Локальный (localhost:8000)")
-        self.local_radio.setChecked(True)
-        self.remote_radio = QRadioButton("Удаленный")
-        
-        button_group = QButtonGroup(self)
-        button_group.addButton(self.local_radio)
-        button_group.addButton(self.remote_radio)
-        
-        self.local_radio.toggled.connect(lambda checked: self.server_edit.setText(
-            "http://localhost:8000" if checked else self.server_edit.text()
-        ))
-        
-        preset_layout.addWidget(self.local_radio)
-        preset_layout.addWidget(self.remote_radio)
-        conn_layout.addRow("Пресет:", preset_layout)
-        
-        conn_group.setLayout(conn_layout)
-        layout.addWidget(conn_group)
-        
-        # Группа настроек темы
-        theme_group = QGroupBox("Цветовая тема")
-        theme_layout = QVBoxLayout()
-        
-        self.theme_combo = QComboBox()
-        self.theme_combo.addItem("Системная", "system")
-        self.theme_combo.addItem("Светлая", "light")
-        self.theme_combo.addItem("Тёмная", "dark")
-        
-        # Устанавливаем текущую тему
-        for i in range(self.theme_combo.count()):
-            if self.theme_combo.itemData(i) == self.current_theme:
-                self.theme_combo.setCurrentIndex(i)
-                break
-        
-        theme_layout.addWidget(QLabel("Выберите тему:"))
-        theme_layout.addWidget(self.theme_combo)
-        theme_group.setLayout(theme_layout)
-        layout.addWidget(theme_group)
-        
-        # Кнопки
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            reload=reload
         )
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
+    except ImportError:
+        print("❌ Ошибка: uvicorn не установлен. Выполните: pip install uvicorn")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Ошибка запуска сервера: {e}")
+        sys.exit(1)
+
+
+def run_client(server_url: str = None, theme: str = "system"):
+    """Запуск клиентской части PyQt5"""
+    print(f"🖥️ Запуск клиента ИАГИ")
+    if server_url:
+        print(f"   Подключение к серверу: {server_url}")
+    else:
+        print("   Использование настроек по умолчанию")
+    
+    try:
+        from PyQt5.QtWidgets import QApplication
+        from client.gui.interface import MainWindow
         
-        self.setLayout(layout)
-    
-    def get_server_url(self) -> str:
-        return self.server_edit.text().rstrip('/')
-    
-    def get_theme(self) -> str:
-        return self.theme_combo.currentData()
+        app = QApplication(sys.argv)
+        app.setStyle('Fusion')
+        
+        window = MainWindow(server_url=server_url, theme=theme)
+        window.show()
+        
+        sys.exit(app.exec_())
+    except ImportError as e:
+        print(f"❌ Ошибка: Не установлены зависимости PyQt5. Выполните: pip install PyQt5 matplotlib")
+        print(f"   Детали: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Ошибка запуска клиента: {e}")
+        sys.exit(1)
 
 
-class APIClient:
-    """HTTP клиент для взаимодействия с сервером ИАГИ"""
+def run_both(host: str = "0.0.0.0", port: int = 8000, theme: str = "system"):
+    """Запуск обеих частей: сервер в фоне и клиент"""
+    import threading
+    import time
     
-    def __init__(self, base_url: str = "http://localhost:8000"):
-        self.base_url = base_url.rstrip('/')
-        self.session = requests.Session()
-        self.timeout = 300  # 5 минут таймаут
+    print(f"🚀 Запуск сервера и клиента ИАГИ")
     
-    def check_connection(self) -> bool:
-        """Проверка подключения к серверу"""
+    # Запуск сервера в отдельном потоке
+    def start_server():
         try:
-            response = self.session.get(f"{self.base_url}/health", timeout=5)
-            return response.status_code == 200
-        except Exception:
-            return False
-    
-    def get_server_info(self) -> Dict[str, Any]:
-        """Получение информации о сервере"""
-        try:
-            response = self.session.get(f"{self.base_url}/", timeout=5)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            raise ConnectionError(f"Не удалось получить информацию о сервере: {e}")
-    
-    def get_profiles(self) -> List[Dict[str, Any]]:
-        """Получение доступных профилей"""
-        try:
-            response = self.session.get(f"{self.base_url}/api/profiles", timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            return data.get('profiles', [])
-        except Exception as e:
-            raise ConnectionError(f"Не удалось получить профили: {e}")
-    
-    def get_algorithms(self) -> List[Dict[str, Any]]:
-        """Получение доступных алгоритмов"""
-        try:
-            response = self.session.get(f"{self.base_url}/api/algorithms", timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            return data.get('algorithms', [])
-        except Exception as e:
-            raise ConnectionError(f"Не удалось получить алгоритмы: {e}")
-    
-    def get_shapes_info(self, file_path: str) -> Dict[str, Any]:
-        """Получение информации о фигурах в файле"""
-        try:
-            with open(file_path, 'rb') as f:
-                files = {'file': (Path(file_path).name, f)}
-                response = self.session.post(
-                    f"{self.base_url}/api/shapes/info",
-                    files=files,
-                    timeout=30
-                )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            raise ConnectionError(f"Не удалось получить информацию о фигурах: {e}")
-    
-    def start_optimization(
-        self,
-        file_path: str,
-        profile: str = 'medium_precision',
-        algorithm: str = 'sequential',
-        technology: str = 'laser',
-        min_gap: float = 0.5,
-        time_limit: int = 300,
-        sheet_width: float = 2000.0,
-        sheet_height: float = 1000.0,
-        use_original_positions: bool = True
-    ) -> str:
-        """Запуск оптимизации и возврат task_id"""
-        try:
-            with open(file_path, 'rb') as f:
-                files = {'file': (Path(file_path).name, f)}
-                data = {
-                    'profile': profile,
-                    'algorithm': algorithm,
-                    'technology': technology,
-                    'min_gap': min_gap,
-                    'time_limit': time_limit,
-                    'sheet_width': sheet_width,
-                    'sheet_height': sheet_height,
-                    'use_original_positions': use_original_positions
-                }
-                response = self.session.post(
-                    f"{self.base_url}/api/optimize",
-                    files=files,
-                    data=data,
-                    timeout=30
-                )
-            response.raise_for_status()
-            result = response.json()
-            return result['task_id']
-        except Exception as e:
-            raise ConnectionError(f"Не удалось запустить оптимизацию: {e}")
-    
-    def get_task_status(self, task_id: str) -> Dict[str, Any]:
-        """Получение статуса задачи"""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/api/status/{task_id}",
-                timeout=10
+            import uvicorn
+            from server.main import app
+            
+            uvicorn.run(
+                app,
+                host=host,
+                port=port,
+                log_level="warning"  # Скрываем логи сервера для чистоты вывода
             )
-            response.raise_for_status()
-            return response.json()
         except Exception as e:
-            raise ConnectionError(f"Не удалось получить статус задачи: {e}")
+            print(f"❌ Ошибка сервера: {e}")
     
-    def download_result(self, task_id: str, format_type: str, output_path: str):
-        """Скачивание результата оптимизации"""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/api/download/{task_id}/{format_type}",
-                timeout=60
-            )
-            response.raise_for_status()
-            
-            with open(output_path, 'wb') as f:
-                f.write(response.content)
-            
-            return output_path
-        except Exception as e:
-            raise ConnectionError(f"Не удалось скачать результат: {e}")
-
-
-class OptimizationThread(QThread):
-    """Поток для мониторинга задачи оптимизации"""
+    server_thread = threading.Thread(target=start_server, daemon=True)
+    server_thread.start()
     
-    status_update = pyqtSignal(dict)
-    finished_signal = pyqtSignal(dict)
-    error_signal = pyqtSignal(str)
+    # Ждём пока сервер запустится
+    print("   ⏳ Ожидание запуска сервера...")
+    time.sleep(2)
     
-    def __init__(self, api_client: APIClient, task_id: str, poll_interval: float = 1.0):
-        super().__init__()
-        self.api_client = api_client
-        self.task_id = task_id
-        self.poll_interval = poll_interval
-        self.running = True
-    
-    def run(self):
-        """Мониторинг статуса задачи"""
-        try:
-            while self.running:
-                status = self.api_client.get_task_status(self.task_id)
-                self.status_update.emit(status)
-                
-                if status['status'] in ['completed', 'failed']:
-                    self.finished_signal.emit(status)
-                    break
-                
-                time.sleep(self.poll_interval)
-        except Exception as e:
-            self.error_signal.emit(str(e))
-    
-    def stop(self):
-        self.running = False
-
-
-class ControlPanel(QWidget):
-    """Панель управления клиентом"""
-    
-    start_optimization = pyqtSignal()
-    stop_optimization = pyqtSignal()
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.current_profile = 'medium_precision'
-        self.placement_mode = 'sequential'
-        self.technology = 'laser'
-        
-        self.init_ui()
-    
-    def init_ui(self):
-        layout = QVBoxLayout()
-        
-        # Профиль конфигурации
-        profile_group = QGroupBox("Профиль конфигурации")
-        profile_layout = QVBoxLayout()
-        
-        self.profile_combo = QComboBox()
-        self.profile_combo.addItems(['high_precision', 'medium_precision', 'low_precision'])
-        self.profile_combo.setCurrentText(self.current_profile)
-        profile_layout.addWidget(QLabel("Выберите профиль:"))
-        profile_layout.addWidget(self.profile_combo)
-        
-        profile_group.setLayout(profile_layout)
-        layout.addWidget(profile_group)
-        
-        # Режим размещения
-        mode_group = QGroupBox("Режим размещения")
-        mode_layout = QVBoxLayout()
-        
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItems(['sequential', 'parallel', 'hybrid'])
-        self.mode_combo.setCurrentText(self.placement_mode)
-        mode_layout.addWidget(QLabel("Выберите режим:"))
-        mode_layout.addWidget(self.mode_combo)
-        
-        mode_group.setLayout(mode_layout)
-        layout.addWidget(mode_group)
-        
-        # Технологические параметры
-        tech_group = QGroupBox("Технологические параметры")
-        tech_layout = QVBoxLayout()
-        
-        tech_layout.addWidget(QLabel("Технология резки:"))
-        self.tech_combo = QComboBox()
-        self.tech_combo.addItems(['laser', 'plasma', 'waterjet', 'default'])
-        self.tech_combo.setCurrentText(self.technology)
-        tech_layout.addWidget(self.tech_combo)
-        
-        gap_layout = QHBoxLayout()
-        gap_layout.addWidget(QLabel("Минимальный зазор (мм):"))
-        self.gap_spin = QDoubleSpinBox()
-        self.gap_spin.setRange(0.1, 10.0)
-        self.gap_spin.setValue(0.5)
-        self.gap_spin.setSingleStep(0.1)
-        gap_layout.addWidget(self.gap_spin)
-        tech_layout.addLayout(gap_layout)
-        
-        time_layout = QHBoxLayout()
-        time_layout.addWidget(QLabel("Макс. время (сек):"))
-        self.time_spin = QSpinBox()
-        self.time_spin.setRange(10, 3600)
-        self.time_spin.setValue(300)
-        self.time_spin.setSingleStep(30)
-        time_layout.addWidget(self.time_spin)
-        tech_layout.addLayout(time_layout)
-        
-        tech_group.setLayout(tech_layout)
-        layout.addWidget(tech_group)
-        
-        # Размеры листа
-        sheet_group = QGroupBox("Размеры листа")
-        sheet_layout = QVBoxLayout()
-        
-        width_layout = QHBoxLayout()
-        width_layout.addWidget(QLabel("Ширина (мм):"))
-        self.sheet_width_spin = QDoubleSpinBox()
-        self.sheet_width_spin.setRange(100, 10000)
-        self.sheet_width_spin.setValue(2000)
-        self.sheet_width_spin.setSingleStep(100)
-        width_layout.addWidget(self.sheet_width_spin)
-        sheet_layout.addLayout(width_layout)
-        
-        height_layout = QHBoxLayout()
-        height_layout.addWidget(QLabel("Высота (мм):"))
-        self.sheet_height_spin = QDoubleSpinBox()
-        self.sheet_height_spin.setRange(100, 10000)
-        self.sheet_height_spin.setValue(1000)
-        self.sheet_height_spin.setSingleStep(100)
-        height_layout.addWidget(self.sheet_height_spin)
-        sheet_layout.addLayout(height_layout)
-        
-        sheet_group.setLayout(sheet_layout)
-        layout.addWidget(sheet_group)
-        
-        # Кнопки управления
-        control_group = QGroupBox("Управление")
-        control_layout = QVBoxLayout()
-        
-        self.start_button = QPushButton("▶ Запустить оптимизацию")
-        self.start_button.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
-        self.start_button.setEnabled(False)
-        control_layout.addWidget(self.start_button)
-        
-        self.stop_button = QPushButton("⏹ Остановить")
-        self.stop_button.setEnabled(False)
-        control_layout.addWidget(self.stop_button)
-        
-        # Индикатор прогресса
-        self.progress_label = QLabel("Готов к работе")
-        control_layout.addWidget(self.progress_label)
-        
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        control_layout.addWidget(self.progress_bar)
-        
-        # Статистика
-        stats_layout = QHBoxLayout()
-        self.utilization_label = QLabel("Использование: -")
-        stats_layout.addWidget(self.utilization_label)
-        control_layout.addLayout(stats_layout)
-        
-        control_group.setLayout(control_layout)
-        layout.addWidget(control_group)
-        
-        # Экспорт
-        export_group = QGroupBox("Экспорт результатов")
-        export_layout = QHBoxLayout()
-        
-        self.dxf_button = QPushButton("DXF")
-        self.dxf_button.setEnabled(False)
-        export_layout.addWidget(self.dxf_button)
-        
-        self.svg_button = QPushButton("SVG")
-        self.svg_button.setEnabled(False)
-        export_layout.addWidget(self.svg_button)
-        
-        self.json_button = QPushButton("JSON")
-        self.json_button.setEnabled(False)
-        export_layout.addWidget(self.json_button)
-        
-        export_group.setLayout(export_layout)
-        layout.addWidget(export_group)
-        
-        self.setLayout(layout)
-    
-    def enable_controls(self, enable: bool):
-        self.start_button.setEnabled(enable)
-        self.stop_button.setEnabled(not enable)
-        self.profile_combo.setEnabled(enable)
-        self.mode_combo.setEnabled(enable)
-        self.tech_combo.setEnabled(enable)
-        self.gap_spin.setEnabled(enable)
-        self.time_spin.setEnabled(enable)
-    
-    def enable_export(self, enable: bool):
-        self.dxf_button.setEnabled(enable)
-        self.svg_button.setEnabled(enable)
-        self.json_button.setEnabled(enable)
-    
-    def update_progress(self, progress: int, status: str, utilization: Optional[float] = None):
-        self.progress_bar.setValue(progress)
-        self.progress_label.setText(status)
-        if utilization is not None:
-            self.utilization_label.setText(f"Использование: {utilization:.1f}%")
-
-
-class MainWindow(QMainWindow):
-    """Главное окно клиентского приложения"""
-    
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("ИАГИ Клиент - Раскрой плоских деталей")
-        self.setGeometry(100, 100, 1200, 800)
-        
-        # Настройки подключения и темы
-        self.settings = QSettings("IAGI", "Client")
-        self.server_url = self.settings.value("server_url", "http://localhost:8000")
-        self.current_theme = self.settings.value("theme", "system")
-        
-        self.api_client = APIClient(self.server_url)
-        
-        # Текущие данные
-        self.current_file = None
-        self.current_task_id = None
-        self.optimization_thread: Optional[OptimizationThread] = None
-        
-        self.init_ui()
-        self.apply_theme(self.current_theme)
-        self.check_server_connection()
-    
-    def init_ui(self):
-        central_widget = QWidget()
-        main_layout = QVBoxLayout()
-        
-        # Верхняя панель с настройками подключения
-        top_panel = QHBoxLayout()
-        
-        self.connection_label = QLabel("Сервер: Не подключено")
-        self.connection_label.setStyleSheet("color: red; font-weight: bold;")
-        top_panel.addWidget(self.connection_label)
-        
-        self.connect_button = QPushButton("🔌 Подключение...")
-        self.connect_button.clicked.connect(self.show_connection_dialog)
-        top_panel.addWidget(self.connect_button)
-        
-        self.refresh_button = QPushButton("🔄 Обновить")
-        self.refresh_button.clicked.connect(self.check_server_connection)
-        top_panel.addWidget(self.refresh_button)
-        
-        top_panel.addStretch()
-        
-        main_layout.addLayout(top_panel)
-        
-        # Основная область
-        splitter = QSplitter(Qt.Horizontal)
-        
-        # Левая панель: управление
-        left_panel = QWidget()
-        left_layout = QVBoxLayout()
-        
-        # Выбор файла
-        file_group = QGroupBox("Входные данные")
-        file_layout = QVBoxLayout()
-        
-        self.file_label = QLabel("Файл не выбран")
-        self.file_label.setStyleSheet("font-style: italic;")
-        file_layout.addWidget(self.file_label)
-        
-        file_button_layout = QHBoxLayout()
-        self.browse_button = QPushButton("📁 Выбрать файл...")
-        self.browse_button.clicked.connect(self.browse_file)
-        file_button_layout.addWidget(self.browse_button)
-        
-        self.shapes_info_label = QLabel("")
-        file_button_layout.addWidget(self.shapes_info_label)
-        
-        file_layout.addLayout(file_button_layout)
-        file_group.setLayout(file_layout)
-        left_layout.addWidget(file_group)
-        
-        # Панель управления
-        self.control_panel = ControlPanel()
-        self.control_panel.start_button.clicked.connect(self.start_optimization)
-        self.control_panel.stop_button.clicked.connect(self.stop_optimization)
-        self.control_panel.dxf_button.clicked.connect(lambda: self.download_result('dxf'))
-        self.control_panel.svg_button.clicked.connect(lambda: self.download_result('svg'))
-        self.control_panel.json_button.clicked.connect(lambda: self.download_result('json'))
-        left_layout.addWidget(self.control_panel)
-        
-        left_panel.setLayout(left_layout)
-        
-        # Правая панель: лог и информация
-        right_panel = QWidget()
-        right_layout = QVBoxLayout()
-        
-        log_group = QGroupBox("Журнал событий")
-        log_layout = QVBoxLayout()
-        
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
-        self.log_text.setMaximumHeight(300)
-        log_layout.addWidget(self.log_text)
-        
-        log_group.setLayout(log_layout)
-        right_layout.addWidget(log_group)
-        
-        info_group = QGroupBox("Информация о задаче")
-        info_layout = QVBoxLayout()
-        
-        self.task_info = QTextEdit()
-        self.task_info.setReadOnly(True)
-        self.task_info.setMaximumHeight(200)
-        info_layout.addWidget(self.task_info)
-        
-        info_group.setLayout(info_layout)
-        right_layout.addWidget(info_group)
-        
-        right_layout.addStretch()
-        right_panel.setLayout(right_layout)
-        
-        splitter.addWidget(left_panel)
-        splitter.addWidget(right_panel)
-        splitter.setSizes([700, 500])
-        
-        main_layout.addWidget(splitter)
-        central_widget.setLayout(main_layout)
-        self.setCentralWidget(central_widget)
-        
-        # Меню
-        self.create_menu()
-        
-        # Статус бар
-        self.statusBar().showMessage("Готов к работе")
-    
-    def create_menu(self):
-        menubar = self.menuBar()
-        
-        file_menu = menubar.addMenu('Файл')
-        
-        connect_action = file_menu.addAction('Подключение к серверу...')
-        connect_action.triggered.connect(self.show_connection_dialog)
-        
-        file_menu.addSeparator()
-        
-        exit_action = file_menu.addAction('Выход')
-        exit_action.triggered.connect(self.close)
-        
-        # Меню настроек
-        settings_menu = menubar.addMenu('Настройки')
-        
-        theme_menu = settings_menu.addMenu('Цветовая тема')
-        
-        self.theme_system_action = theme_menu.addAction('Системная')
-        self.theme_system_action.setCheckable(True)
-        self.theme_system_action.setChecked(self.current_theme == 'system')
-        self.theme_system_action.triggered.connect(lambda: self.apply_theme('system'))
-        
-        self.theme_light_action = theme_menu.addAction('Светлая')
-        self.theme_light_action.setCheckable(True)
-        self.theme_light_action.setChecked(self.current_theme == 'light')
-        self.theme_light_action.triggered.connect(lambda: self.apply_theme('light'))
-        
-        self.theme_dark_action = theme_menu.addAction('Тёмная')
-        self.theme_dark_action.setCheckable(True)
-        self.theme_dark_action.setChecked(self.current_theme == 'dark')
-        self.theme_dark_action.triggered.connect(lambda: self.apply_theme('dark'))
-        
-        help_menu = menubar.addMenu('Помощь')
-        
-        about_action = help_menu.addAction('О программе')
-        about_action.triggered.connect(self.show_about)
-    
-    def apply_theme(self, theme: str):
-        """Применяет цветовую тему"""
-        self.current_theme = theme
-        self.settings.setValue("theme", theme)
-        
-        palette = get_palette(theme)
-        stylesheet = generate_stylesheet(palette)
-        self.setStyleSheet(stylesheet)
-        
-        # Обновляем чекбоксы в меню
-        if hasattr(self, 'theme_system_action'):
-            self.theme_system_action.setChecked(theme == 'system')
-            self.theme_light_action.setChecked(theme == 'light')
-            self.theme_dark_action.setChecked(theme == 'dark')
-        
-        self.log_message(f"Применена тема: {theme}")
-    
-    def show_connection_dialog(self):
-        dialog = ServerConnectionDialog(self, self.server_url, self.current_theme)
-        if dialog.exec_() == QDialog.Accepted:
-            self.server_url = dialog.get_server_url()
-            self.settings.setValue("server_url", self.server_url)
-            self.api_client = APIClient(self.server_url)
-            
-            # Применяем новую тему если она изменилась
-            new_theme = dialog.get_theme()
-            if new_theme != self.current_theme:
-                self.apply_theme(new_theme)
-            
-            self.check_server_connection()
-    
-    def check_server_connection(self):
-        if self.api_client.check_connection():
-            self.connection_label.setText(f"Сервер: {self.server_url} ✓")
-            self.connection_label.setStyleSheet("color: green; font-weight: bold;")
-            self.log_message("Подключение к серверу успешно")
-            self.statusBar().showMessage(f"Подключено к {self.server_url}")
-        else:
-            self.connection_label.setText("Сервер: Не подключено")
-            self.connection_label.setStyleSheet("color: red; font-weight: bold;")
-            self.log_message("Не удалось подключиться к серверу")
-            self.statusBar().showMessage("Сервер недоступен")
-    
-    def browse_file(self):
-        filename, _ = QFileDialog.getOpenFileName(
-            self,
-            "Выберите файл с фигурами",
-            "",
-            "DXF Files (*.dxf);;STEP Files (*.step *.stp);;All Files (*)"
-        )
-        
-        if filename:
-            self.current_file = filename
-            self.file_label.setText(Path(filename).name)
-            self.log_message(f"Выбран файл: {filename}")
-            
-            # Получение информации о фигурах
-            try:
-                shapes_info = self.api_client.get_shapes_info(filename)
-                num_shapes = shapes_info.get('num_shapes', 0)
-                self.shapes_info_label.setText(f"{num_shapes} фигур")
-                self.control_panel.start_button.setEnabled(True)
-                self.log_message(f"Загружено {num_shapes} фигур")
-            except Exception as e:
-                self.shapes_info_label.setText("Ошибка")
-                self.log_message(f"Ошибка получения информации: {e}")
-                self.control_panel.start_button.setEnabled(False)
-    
-    def start_optimization(self):
-        if not self.current_file:
-            QMessageBox.warning(self, "Предупреждение", "Выберите файл для оптимизации")
-            return
-        
-        self.control_panel.enable_controls(False)
-        self.control_panel.enable_export(False)
-        
-        try:
-            task_id = self.api_client.start_optimization(
-                file_path=self.current_file,
-                profile=self.control_panel.profile_combo.currentText(),
-                algorithm=self.control_panel.mode_combo.currentText(),
-                technology=self.control_panel.tech_combo.currentText(),
-                min_gap=self.control_panel.gap_spin.value(),
-                time_limit=self.control_panel.time_spin.value(),
-                sheet_width=self.control_panel.sheet_width_spin.value(),
-                sheet_height=self.control_panel.sheet_height_spin.value(),
-                use_original_positions=True
-            )
-            
-            self.current_task_id = task_id
-            self.log_message(f"Задача запущена: {task_id}")
-            self.task_info.setText(f"ID задачи: {task_id}\nСтатус: В ожидании...")
-            
-            # Запуск мониторинга
-            self.optimization_thread = OptimizationThread(self.api_client, task_id)
-            self.optimization_thread.status_update.connect(self.on_status_update)
-            self.optimization_thread.finished_signal.connect(self.on_optimization_finished)
-            self.optimization_thread.error_signal.connect(self.on_optimization_error)
-            self.optimization_thread.start()
-            
-            self.control_panel.stop_button.setEnabled(True)
-            self.statusBar().showMessage("Оптимизация запущена...")
-            
-        except Exception as e:
-            self.log_message(f"Ошибка запуска: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось запустить оптимизацию: {e}")
-            self.control_panel.enable_controls(True)
-    
-    def on_status_update(self, status: dict):
-        self.control_panel.update_progress(
-            status.get('progress', 0),
-            status.get('message', ''),
-            status.get('utilization')
-        )
-        
-        self.task_info.setText(
-            f"ID задачи: {self.current_task_id}\n"
-            f"Статус: {status.get('status', 'unknown')}\n"
-            f"Прогресс: {status.get('progress', 0)}%\n"
-            f"Сообщение: {status.get('message', '')}"
-        )
-    
-    def on_optimization_finished(self, status: dict):
-        self.log_message(f"Оптимизация завершена: {status.get('message', '')}")
-        self.control_panel.enable_export(True)
-        self.control_panel.stop_button.setEnabled(False)
-        utilization = status.get('utilization') if status else 0
-        if utilization is None:
-            utilization = 0
-        self.statusBar().showMessage(f"Оптимизация завершена. Использование: {utilization:.1f}%")
-    
-    def on_optimization_error(self, error: str):
-        self.log_message(f"Ошибка: {error}")
-        QMessageBox.critical(self, "Ошибка", f"Ошибка оптимизации: {error}")
-        self.control_panel.enable_controls(True)
-    
-    def stop_optimization(self):
-        if self.optimization_thread:
-            self.optimization_thread.stop()
-            self.log_message("Оптимизация остановлена пользователем")
-            self.control_panel.enable_controls(True)
-    
-    def download_result(self, format_type: str):
-        if not self.current_task_id:
-            return
-        
-        output_dir = QFileDialog.getExistingDirectory(
-            self, "Выберите директорию для сохранения"
-        )
-        
-        if not output_dir:
-            return
-        
-        try:
-            output_path = Path(output_dir) / f"iagi_result.{format_type}"
-            self.api_client.download_result(self.current_task_id, format_type, str(output_path))
-            self.log_message(f"Результат сохранен: {output_path}")
-            QMessageBox.information(self, "Экспорт завершен", f"Файл сохранен:\n{output_path}")
-        except Exception as e:
-            self.log_message(f"Ошибка экспорта: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить результат: {e}")
-    
-    def log_message(self, message: str):
-        timestamp = time.strftime("%H:%M:%S")
-        self.log_text.append(f"[{timestamp}] {message}")
-    
-    def show_about(self):
-        QMessageBox.about(
-            self, "О программе",
-            "ИАГИ Клиент\n\n"
-            "Клиентское приложение для системы оптимизации раскроя\n"
-            "плоских деталей с использованием гравитационной имитации.\n\n"
-            "Версия 1.0\n"
-            "Подключается к серверу ИАГИ через HTTP API"
-        )
+    # Запуск клиента
+    server_url = f"http://localhost:{port}"
+    run_client(server_url=server_url, theme=theme)
 
 
 def main():
-    app = QApplication(sys.argv)
-    app.setStyle('Fusion')
+    parser = argparse.ArgumentParser(
+        description="ИАГИ - Система оптимизации раскроя плоских деталей",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Примеры использования:
+  python main.py --server              Запустить только сервер
+  python main.py --client              Запустить только клиент
+  python main.py --both                Запустить сервер и клиент вместе
+  python main.py --server --host 0.0.0.0 --port 8080  Сервер на порту 8080
+  python main.py --client --url http://192.168.1.100:8000  Клиент с удалённым сервером
+  python main.py --both --theme dark   Запуск всего с тёмной темой
+        """
+    )
     
-    # Применяем тему при запуске
-    window = MainWindow()
-    window.show()
+    # Режимы запуска
+    mode_group = parser.add_argument_group('Режим запуска')
+    mode_group.add_argument('--server', action='store_true',
+                           help='Запустить только серверную часть (FastAPI)')
+    mode_group.add_argument('--client', action='store_true',
+                           help='Запустить только клиентскую часть (PyQt5)')
+    mode_group.add_argument('--both', action='store_true',
+                           help='Запустить обе части одновременно')
     
-    sys.exit(app.exec_())
+    # Настройки сервера
+    server_group = parser.add_argument_group('Настройки сервера')
+    server_group.add_argument('--host', type=str, default='0.0.0.0',
+                             help='Хост для сервера (по умолчанию: 0.0.0.0)')
+    server_group.add_argument('--port', type=int, default=8000,
+                             help='Порт для сервера (по умолчанию: 8000)')
+    server_group.add_argument('--reload', action='store_true',
+                             help='Включить автоперезагрузку сервера (для разработки)')
+    
+    # Настройки клиента
+    client_group = parser.add_argument_group('Настройки клиента')
+    client_group.add_argument('--url', type=str, default=None,
+                             help='URL сервера для клиента (по умолчанию: http://localhost:8000)')
+    client_group.add_argument('--theme', type=str, choices=['system', 'light', 'dark'],
+                             default='system',
+                             help='Цветовая тема интерфейса (по умолчанию: system)')
+    
+    args = parser.parse_args()
+    
+    # Если ни один режим не указан, показываем справку
+    if not (args.server or args.client or args.both):
+        parser.print_help()
+        print("\n❌ Укажите режим запуска: --server, --client или --both")
+        sys.exit(1)
+    
+    # Запуск в соответствии с выбранным режимом
+    if args.both:
+        run_both(host=args.host, port=args.port, theme=args.theme)
+    elif args.server:
+        run_server(host=args.host, port=args.port, reload=args.reload)
+    elif args.client:
+        run_client(server_url=args.url, theme=args.theme)
 
 
 if __name__ == "__main__":
