@@ -17,21 +17,24 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QGroupBox, QTabWidget, QFileDialog, QProgressBar, QMessageBox,
                              QTextEdit, QSplitter, QCheckBox, QTableWidget, QTableWidgetItem,
                              QHeaderView, QDialog, QFormLayout, QDialogButtonBox, QLineEdit,
-                             QRadioButton, QButtonGroup)
-from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSize, QUrl
+                             QRadioButton, QButtonGroup, QMenu, QAction)
+from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSize, QUrl, QSettings
 from PyQt5.QtGui import QColor, QPalette, QLinearGradient, QBrush, QPainter, QPen, QPolygonF, QFont
+
+from themes import get_palette, generate_stylesheet, get_system_theme
 
 
 class ServerConnectionDialog(QDialog):
     """Диалог настройки подключения к серверу"""
     
-    def __init__(self, parent=None, current_url: str = "http://localhost:8000"):
+    def __init__(self, parent=None, current_url: str = "http://localhost:8000", current_theme: str = "system"):
         super().__init__(parent)
         self.setWindowTitle("Настройка подключения к серверу")
         self.setModal(True)
         self.setMinimumWidth(400)
         
         self.current_url = current_url
+        self.current_theme = current_theme
         self.init_ui()
     
     def init_ui(self):
@@ -68,6 +71,26 @@ class ServerConnectionDialog(QDialog):
         conn_group.setLayout(conn_layout)
         layout.addWidget(conn_group)
         
+        # Группа настроек темы
+        theme_group = QGroupBox("Цветовая тема")
+        theme_layout = QVBoxLayout()
+        
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("Системная", "system")
+        self.theme_combo.addItem("Светлая", "light")
+        self.theme_combo.addItem("Тёмная", "dark")
+        
+        # Устанавливаем текущую тему
+        for i in range(self.theme_combo.count()):
+            if self.theme_combo.itemData(i) == self.current_theme:
+                self.theme_combo.setCurrentIndex(i)
+                break
+        
+        theme_layout.addWidget(QLabel("Выберите тему:"))
+        theme_layout.addWidget(self.theme_combo)
+        theme_group.setLayout(theme_layout)
+        layout.addWidget(theme_group)
+        
         # Кнопки
         button_box = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
@@ -80,6 +103,9 @@ class ServerConnectionDialog(QDialog):
     
     def get_server_url(self) -> str:
         return self.server_edit.text().rstrip('/')
+    
+    def get_theme(self) -> str:
+        return self.theme_combo.currentData()
 
 
 class APIClient:
@@ -422,8 +448,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("ИАГИ Клиент - Раскрой плоских деталей")
         self.setGeometry(100, 100, 1200, 800)
         
-        # Настройки подключения
-        self.server_url = "http://localhost:8000"
+        # Настройки подключения и темы
+        self.settings = QSettings("IAGI", "Client")
+        self.server_url = self.settings.value("server_url", "http://localhost:8000")
+        self.current_theme = self.settings.value("theme", "system")
+        
         self.api_client = APIClient(self.server_url)
         
         # Текущие данные
@@ -432,6 +461,7 @@ class MainWindow(QMainWindow):
         self.optimization_thread: Optional[OptimizationThread] = None
         
         self.init_ui()
+        self.apply_theme(self.current_theme)
         self.check_server_connection()
     
     def init_ui(self):
@@ -551,16 +581,60 @@ class MainWindow(QMainWindow):
         exit_action = file_menu.addAction('Выход')
         exit_action.triggered.connect(self.close)
         
+        # Меню настроек
+        settings_menu = menubar.addMenu('Настройки')
+        
+        theme_menu = settings_menu.addMenu('Цветовая тема')
+        
+        self.theme_system_action = theme_menu.addAction('Системная')
+        self.theme_system_action.setCheckable(True)
+        self.theme_system_action.setChecked(self.current_theme == 'system')
+        self.theme_system_action.triggered.connect(lambda: self.apply_theme('system'))
+        
+        self.theme_light_action = theme_menu.addAction('Светлая')
+        self.theme_light_action.setCheckable(True)
+        self.theme_light_action.setChecked(self.current_theme == 'light')
+        self.theme_light_action.triggered.connect(lambda: self.apply_theme('light'))
+        
+        self.theme_dark_action = theme_menu.addAction('Тёмная')
+        self.theme_dark_action.setCheckable(True)
+        self.theme_dark_action.setChecked(self.current_theme == 'dark')
+        self.theme_dark_action.triggered.connect(lambda: self.apply_theme('dark'))
+        
         help_menu = menubar.addMenu('Помощь')
         
         about_action = help_menu.addAction('О программе')
         about_action.triggered.connect(self.show_about)
     
+    def apply_theme(self, theme: str):
+        """Применяет цветовую тему"""
+        self.current_theme = theme
+        self.settings.setValue("theme", theme)
+        
+        palette = get_palette(theme)
+        stylesheet = generate_stylesheet(palette)
+        self.setStyleSheet(stylesheet)
+        
+        # Обновляем чекбоксы в меню
+        if hasattr(self, 'theme_system_action'):
+            self.theme_system_action.setChecked(theme == 'system')
+            self.theme_light_action.setChecked(theme == 'light')
+            self.theme_dark_action.setChecked(theme == 'dark')
+        
+        self.log_message(f"Применена тема: {theme}")
+    
     def show_connection_dialog(self):
-        dialog = ServerConnectionDialog(self, self.server_url)
+        dialog = ServerConnectionDialog(self, self.server_url, self.current_theme)
         if dialog.exec_() == QDialog.Accepted:
             self.server_url = dialog.get_server_url()
+            self.settings.setValue("server_url", self.server_url)
             self.api_client = APIClient(self.server_url)
+            
+            # Применяем новую тему если она изменилась
+            new_theme = dialog.get_theme()
+            if new_theme != self.current_theme:
+                self.apply_theme(new_theme)
+            
             self.check_server_connection()
     
     def check_server_connection(self):
@@ -713,13 +787,7 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
     
-    palette = QPalette()
-    gradient = QLinearGradient(0, 0, 0, 400)
-    gradient.setColorAt(0.0, QColor(45, 45, 60))
-    gradient.setColorAt(1.0, QColor(30, 30, 40))
-    palette.setBrush(QPalette.Window, QBrush(gradient))
-    app.setPalette(palette)
-    
+    # Применяем тему при запуске
     window = MainWindow()
     window.show()
     
