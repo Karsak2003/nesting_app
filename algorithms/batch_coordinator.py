@@ -292,7 +292,7 @@ class BatchNestingCoordinator:
                 json.dump(sheet_data, f, indent=2, ensure_ascii=False)
             
             # Экспорт раскроя в форматах DXF, SVG, JSON
-            from io.exporter import export_results
+            from my_io.exporter import export_results
             
             placements = []
             for agent in result['agents']:

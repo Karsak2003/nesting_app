@@ -15,17 +15,12 @@
 - Учет технологических ограничений
 - Гарантированная сходимость и устойчивость
 """
-
-import os
-import sys
-import time
-import argparse
-import logging
-import json
-import numpy as np
-from pathlib import Path
-from typing import List, Dict, Tuple, Optional, Any
-
+from root_IMPORTS import (
+    os, sys, time, argparse, logging, json, 
+    numpy as np, 
+    pl_Path as Path, 
+    List, Dict, Tuple, Optional, Any
+)
 # Настройка путей для импорта модулей
 sys.path.append(str(Path(__file__).parent))
 
