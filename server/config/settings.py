@@ -598,6 +598,37 @@ def load_profile(profile_name: str):
     config.apply_profile(profile_name)
 
 
+def save_profile(profile_name: str, config_file: Optional[str] = None):
+    """
+    Сохранение текущего профиля конфигурации в файл
+    
+    :param profile_name: Имя профиля для сохранения
+    :param config_file: Путь к файлу конфигурации (по умолчанию profiles/{profile_name}.json)
+    """
+    config = get_config()
+    
+    if config_file is None:
+        profiles_dir = Path(config.paths['data_dir']) / 'profiles'
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        config_file = profiles_dir / f"{profile_name}.json"
+    
+    # Собираем текущую конфигурацию в словарь
+    config_data = {
+        'system': config.system,
+        'geometry': config.geometry,
+        'dynamics': config.dynamics,
+        'placement': config.placement,
+        'technological_constraints': config.technological_constraints,
+        'paths': config.paths
+    }
+    
+    # Сохраняем в JSON
+    with open(config_file, 'w', encoding='utf-8') as f:
+        json.dump(config_data, f, indent=2, ensure_ascii=False)
+    
+    config.logger.info(f"Профиль конфигурации сохранён в файл: {config_file}")
+
+
 def reset_config():
     """
     Сброс конфигурации к значениям по умолчанию

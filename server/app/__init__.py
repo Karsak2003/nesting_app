@@ -80,7 +80,7 @@ __all__ = [
     # Algorithms
     'sequential_placement', 'parallel_placement', 'hybrid_placement',
     'multi_start_optimization', 'BatchCoordinator', 
-    'distribute_shapes_to_batches', 'PriorityManager', 'StabilizationController',
+    'BatchDistributionOptimizer', 'PriorityManager', 'StabilizationController',
     
     # IO
     'import_dxf', 'import_step', 'export_results',
