@@ -94,6 +94,12 @@ class RealTimeVisualization(FigureCanvas):
         
         self.sheet_size = sheet_size
         self.placed_shapes = []
+        self.defect_zones = []
+        self.forces = {}
+        self.show_forces = False
+        self.show_velocities = False
+        self.show_sdf = False
+        self.color_map = {}
         self.setup_plot()
     
     def setup_plot(self):
@@ -132,31 +138,26 @@ class RealTimeVisualization(FigureCanvas):
         
         self.placed_shapes = shapes_data
         
-        # Отрисовка размещённых фигур
-        color_map = {
-            1: (0.0, 0.8, 0.0, 0.8),   # Зеленый для высокого приоритета
-            2: (0.0, 0.0, 1.0, 0.8),   # Синий для среднего приоритета
-            3: (1.0, 0.5, 0.0, 0.8),   # Оранжевый для низкого приоритета
-        }
+        # Отрисовка дефектных зон
+        self._draw_defect_zones()
         
-        for shape in shapes_data:
-            contour = shape.get('contour', [])
-            if len(contour) < 3:
-                continue
-                
-            priority = shape.get('priority', 2)
-            color = color_map.get(priority, (0.2, 0.6, 1.0, 0.8))
-            
-            polygon = MplPolygon(contour, closed=True,
-                               fill=True, facecolor=color[:3],
-                               edgecolor='black', linewidth=1.0, zorder=10,
-                               alpha=color[3] if len(color) > 3 else 0.8)
-            self.axes.add_patch(polygon)
-            
-            # Центр масс
-            if 'centroid' in shape:
-                cx, cy = shape['centroid']
-                self.axes.plot(cx, cy, 'ko', markersize=3, zorder=11)
+        # Отрисовка размещённых фигур по приоритетам (для корректного наложения)
+        max_priority = max(shape.get('priority', 2) for shape in shapes_data) if shapes_data else 1
+        
+        for priority in range(max_priority, 0, -1):
+            for shape in shapes_data:
+                if shape.get('priority', 2) == priority:
+                    self._draw_shape(shape, priority)
+        
+        # Отрисовка сил и скоростей, если включено
+        if self.show_forces:
+            self._draw_forces()
+        
+        if self.show_velocities:
+            self._draw_velocities()
+        
+        # Обновление легенды
+        self._update_legend()
         
         # Добавление информации об утилизации
         self.axes.text(0.02, 0.98, f"Использование: {utilization:.1f}%",
@@ -165,6 +166,138 @@ class RealTimeVisualization(FigureCanvas):
                       bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         
         self.draw()
+    
+    def _draw_shape(self, shape: dict, priority: int):
+        """Отрисовка отдельной фигуры"""
+        contour = shape.get('contour', [])
+        if len(contour) < 3:
+            return
+            
+        color = self._get_priority_color(priority)
+        
+        # Основной контур фигуры
+        polygon = MplPolygon(contour, closed=True,
+                           fill=True, facecolor=color[:3],
+                           edgecolor='black', linewidth=1.5, zorder=10,
+                           alpha=color[3] if len(color) > 3 else 0.8)
+        self.axes.add_patch(polygon)
+        
+        # Центр масс
+        if 'centroid' in shape:
+            cx, cy = shape['centroid']
+            self.axes.plot(cx, cy, 'ko', markersize=4, zorder=11)
+        
+        # Подпись с именем и приоритетом
+        name = shape.get('name', f'Part_{priority}')
+        if 'centroid' in shape:
+            self.axes.text(cx, cy, f'{name}\nP={priority}', 
+                          ha='center', va='center', fontsize=8,
+                          bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', boxstyle='round,pad=0.3'),
+                          zorder=12)
+    
+    def _draw_defect_zones(self):
+        """Отрисовка дефектных зон"""
+        for i, defect in enumerate(self.defect_zones):
+            contour = defect.get('contour', [])
+            if len(contour) < 3:
+                continue
+                
+            defect_polygon = MplPolygon(contour, closed=True,
+                                      fill=True, facecolor='red', alpha=0.3,
+                                      edgecolor='darkred', linewidth=1.5,
+                                      linestyle='--', zorder=5)
+            self.axes.add_patch(defect_polygon)
+            
+            # Текстовая метка для дефекта
+            if 'centroid' in defect:
+                centroid = defect['centroid']
+                self.axes.text(centroid[0], centroid[1], f"ДЕФЕКТ {i+1}", 
+                              ha='center', va='center', fontsize=8, color='darkred',
+                              bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'),
+                              zorder=6)
+    
+    def _draw_forces(self):
+        """Отрисовка векторов сил"""
+        scale = 0.5  # Масштаб для отображения сил
+        
+        for shape_id, force_data in self.forces.items():
+            if isinstance(force_data, dict) and 'vector' in force_data:
+                force = np.array(force_data['vector'])
+                position = force_data.get('position', [0, 0])
+                
+                # Вектор силы
+                end_point = position + force * scale
+                self.axes.annotate('', xy=end_point, xytext=position,
+                                 arrowprops=dict(arrowstyle='->', color='blue', lw=2),
+                                 zorder=15)
+    
+    def _draw_velocities(self):
+        """Отрисовка векторов скоростей"""
+        scale = 2.0  # Масштаб для отображения скоростей
+        
+        for shape in self.placed_shapes:
+            if 'velocity' in shape and not shape.get('is_frozen', False):
+                velocity = np.array(shape['velocity'])
+                position = shape.get('centroid', [0, 0])
+                
+                # Вектор скорости
+                end_point = position + velocity * scale
+                self.axes.annotate('', xy=end_point, xytext=position,
+                                 arrowprops=dict(arrowstyle='->', color='green', lw=1.5),
+                                 zorder=15)
+    
+    def _get_priority_color(self, priority, alpha=0.8):
+        """Получение цвета для заданного приоритета"""
+        color_map = {
+            1: (0.0, 0.8, 0.0, alpha),   # Зеленый для высокого приоритета
+            2: (0.0, 0.0, 1.0, alpha),   # Синий для среднего приоритета
+            3: (1.0, 0.5, 0.0, alpha),   # Оранжевый для низкого приоритета
+            4: (0.8, 0.0, 0.8, alpha),   # Фиолетовый
+            5: (0.5, 0.5, 0.5, alpha)    # Серый для остальных
+        }
+        return color_map.get(priority, (0.2, 0.6, 1.0, alpha))  # Голубой по умолчанию
+    
+    def _update_legend(self):
+        """Обновление легенды графика"""
+        from matplotlib.lines import Line2D
+        
+        legend_elements = [
+            Line2D([0], [0], color=self._get_priority_color(1), lw=4, label='Приоритет 1 (высокий)'),
+            Line2D([0], [0], color=self._get_priority_color(2), lw=4, label='Приоритет 2 (средний)'),
+            Line2D([0], [0], color=self._get_priority_color(3), lw=4, label='Приоритет 3 (низкий)'),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='red', markersize=8, 
+                  label='Дефектные зоны'),
+            Line2D([0], [0], color='blue', lw=2, linestyle='-', label='Силы (при включении)'),
+            Line2D([0], [0], color='green', lw=2, linestyle='-', label='Скорости (при включении)')
+        ]
+        
+        self.axes.legend(handles=legend_elements, loc='upper right', fontsize=9)
+    
+    def toggle_forces(self, show=True):
+        """Переключение отображения сил"""
+        self.show_forces = show
+        self.update_visualization(self.placed_shapes)
+    
+    def toggle_velocities(self, show=True):
+        """Переключение отображения скоростей"""
+        self.show_velocities = show
+        self.update_visualization(self.placed_shapes)
+    
+    def toggle_sdf(self, show=True):
+        """Переключение отображения полей расстояний"""
+        self.show_sdf = show
+        self.update_visualization(self.placed_shapes)
+    
+    def set_defect_zones(self, defect_zones: list):
+        """Установка дефектных зон для отображения"""
+        self.defect_zones = defect_zones
+        self.update_visualization(self.placed_shapes)
+    
+    def set_forces(self, forces: dict):
+        """Установка данных о силах для отображения"""
+        self.forces = forces
+        if self.show_forces:
+            self.update_visualization(self.placed_shapes)
     
     def set_sheet_size(self, width: float, height: float):
         """Изменение размеров листа"""
@@ -267,11 +400,15 @@ class ServerConnectionDialog(QDialog):
 class ControlPanel(QWidget):
     """
     Панель управления процессом раскроя ИАГИ
-    Расширенная версия с поддержкой удалённого сервера
+    Согласно разделу 3.3.4 и 3.3.6, пользователь должен иметь возможность гибко
+    настраивать параметры динамической системы для достижения оптимального результата.
     """
     
     start_optimization = pyqtSignal()
     stop_optimization = pyqtSignal()
+    pause_optimization = pyqtSignal()
+    reset_simulation = pyqtSignal()
+    export_results = pyqtSignal(str)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -291,12 +428,13 @@ class ControlPanel(QWidget):
         self.profile_combo = QComboBox()
         self.profile_combo.addItems(['high_precision', 'medium_precision', 'low_precision'])
         self.profile_combo.setCurrentText(self.current_profile)
-        profile_layout.addWidget(QLabel("Выберите профиль:"))
+        self.profile_combo.currentTextChanged.connect(self.on_profile_changed)
+        profile_layout.addWidget(QLabel("Выберите профиль для отрасли:"))
         profile_layout.addWidget(self.profile_combo)
         
         profile_info = QTextEdit()
         profile_info.setReadOnly(True)
-        profile_info.setFixedHeight(60)
+        profile_info.setFixedHeight(80)
         profile_info.setText(
             "high_precision: Авиация, космос (точность 0.05 мм)\n"
             "medium_precision: Машиностроение (точность 0.1 мм)\n"
@@ -314,16 +452,17 @@ class ControlPanel(QWidget):
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(['sequential', 'parallel', 'hybrid'])
         self.mode_combo.setCurrentText(self.placement_mode)
-        mode_layout.addWidget(QLabel("Выберите режим:"))
+        self.mode_combo.currentTextChanged.connect(self.on_mode_changed)
+        mode_layout.addWidget(QLabel("Выберите режим размещения:"))
         mode_layout.addWidget(self.mode_combo)
         
         mode_info = QTextEdit()
         mode_info.setReadOnly(True)
-        mode_info.setFixedHeight(60)
+        mode_info.setFixedHeight(80)
         mode_info.setText(
             "sequential: Технологически корректный раскрой\n"
             "parallel: Максимизация плотности упаковки\n"
-            "hybrid: Комбинация методов"
+            "hybrid: Комбинация методов (ГА-ИАГИ, PSO-ИАГИ)"
         )
         mode_layout.addWidget(mode_info)
         
@@ -338,6 +477,7 @@ class ControlPanel(QWidget):
         self.tech_combo = QComboBox()
         self.tech_combo.addItems(['laser', 'plasma', 'waterjet', 'default'])
         self.tech_combo.setCurrentText(self.technology)
+        self.tech_combo.currentTextChanged.connect(self.on_technology_changed)
         tech_layout.addWidget(self.tech_combo)
         
         gap_layout = QHBoxLayout()
@@ -442,25 +582,49 @@ class ControlPanel(QWidget):
         
         self.setLayout(layout)
     
+    def on_profile_changed(self, profile_name):
+        """Обработчик изменения профиля"""
+        self.current_profile = profile_name
+        QMessageBox.information(self, "Профиль изменен", 
+                               f"Применен профиль: {profile_name}")
+    
+    def on_mode_changed(self, mode):
+        """Обработчик изменения режима"""
+        self.placement_mode = mode
+        
+        if mode == 'hybrid':
+            QMessageBox.information(self, "Гибридный режим", 
+                                   "Включены гибридные алгоритмы (ГА-ИАГИ, PSO-ИАГИ).\n"
+                                   "Оптимизация может занять больше времени, но обеспечит более высокую плотность.")
+    
+    def on_technology_changed(self, technology):
+        """Обработчик изменения технологии"""
+        self.technology = technology
+        QMessageBox.information(self, "Технология изменена", 
+                               f"Установлена технология: {technology}")
+    
     def enable_controls(self, enable: bool):
         self.start_button.setEnabled(enable)
+        self.pause_button.setEnabled(not enable)  # Пауза доступна только во время работы
         self.stop_button.setEnabled(not enable)
         self.profile_combo.setEnabled(enable)
         self.mode_combo.setEnabled(enable)
         self.tech_combo.setEnabled(enable)
         self.gap_spin.setEnabled(enable)
         self.time_spin.setEnabled(enable)
+        self.reset_button.setEnabled(enable)
     
     def enable_export(self, enable: bool):
         self.dxf_button.setEnabled(enable)
         self.svg_button.setEnabled(enable)
         self.json_button.setEnabled(enable)
     
-    def update_progress(self, progress: int, status: str, utilization: Optional[float] = None):
+    def update_progress(self, progress: int, status: str, utilization: Optional[float] = None, energy: float = 0.0):
         self.progress_bar.setValue(progress)
         self.progress_label.setText(status)
         if utilization is not None:
             self.utilization_label.setText(f"Использование: {utilization:.1f}%")
+        self.energy_label.setText(f"Энергия: {energy:.2f}")
 
 
 class MonitoringPanel(QWidget):
