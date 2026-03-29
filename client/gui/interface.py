@@ -6,8 +6,10 @@
 
 import sys
 import time
+import json
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from datetime import datetime
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -20,9 +22,61 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QGroupBox, QTabWidget, QFileDialog, QProgressBar, QMessageBox,
                              QTextEdit, QSplitter, QCheckBox, QTableWidget, QTableWidgetItem,
                              QHeaderView, QDialog, QFormLayout, QDialogButtonBox, QLineEdit,
-                             QRadioButton, QButtonGroup, QMenu, QAction, QStatusBar)
-from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSize, QSettings
-from PyQt5.QtGui import QColor, QPalette, QFont
+                             QRadioButton, QButtonGroup, QMenu, QAction, QStatusBar,
+                             QListWidget, QListWidgetItem, QFrame)
+from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSize, QSettings, QProcess
+from PyQt5.QtGui import QColor, QPalette, QFont, QPixmap, QPainter
+
+
+# Загрузка настроек клиента
+def get_client_config() -> Dict[str, Any]:
+    """Загрузка конфигурации клиента из JSON файла"""
+    config_path = Path(__file__).parent.parent / "config" / "settings.json"
+    default_config = {
+        "server": {
+            "url": "http://localhost:8000",
+            "timeout": 300
+        },
+        "theme": "system",
+        "local_server": {
+            "enabled": True,
+            "auto_start": False,
+            "port": 8000,
+            "show_console": True
+        },
+        "last_used": {
+            "profile": "medium_precision",
+            "algorithm": "sequential",
+            "technology": "laser"
+        }
+    }
+    
+    if config_path.exists():
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                # Объединяем с дефолтными значениями
+                for key in default_config:
+                    if key not in config:
+                        config[key] = default_config[key]
+                    elif isinstance(default_config[key], dict):
+                        for subkey in default_config[key]:
+                            if subkey not in config[key]:
+                                config[key][subkey] = default_config[key][subkey]
+                return config
+        except Exception as e:
+            print(f"Ошибка загрузки конфига: {e}")
+    
+    return default_config
+
+
+def save_client_config(config: Dict[str, Any]):
+    """Сохранение конфигурации клиента в JSON файл"""
+    config_path = Path(__file__).parent.parent / "config" / "settings.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(config_path, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
 
 
 class RealTimeVisualization(FigureCanvas):
@@ -473,6 +527,396 @@ class MonitoringPanel(QWidget):
     def clear_log(self):
         """Очистка лога"""
         self.log_text.clear()
+
+
+class MonitoringPanel(QWidget):
+    """
+    Панель мониторинга процесса оптимизации ИАГИ
+    Включает статистику, графики сходимости и лог событий
+    """
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+    
+    def init_ui(self):
+        """Инициализация элементов мониторинга"""
+        layout = QVBoxLayout()
+        
+        # Вкладки для разных типов мониторинга
+        self.tabs = QTabWidget()
+        
+        # Вкладка: Статистика процесса
+        stats_tab = QWidget()
+        stats_layout = QVBoxLayout()
+        
+        # Таблица агентов/фигур
+        self.agents_table = QTableWidget()
+        self.agents_table.setColumnCount(6)
+        self.agents_table.setHorizontalHeaderLabels(
+            ["ID", "Имя", "Приоритет", "Положение", "Угол", "Статус"]
+        )
+        self.agents_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        stats_layout.addWidget(QLabel("Состояние фигур:"))
+        stats_layout.addWidget(self.agents_table)
+        
+        # Статистика энергии
+        energy_layout = QHBoxLayout()
+        
+        self.total_energy_label = QLabel("Полная энергия: 0.0")
+        energy_layout.addWidget(self.total_energy_label)
+        
+        self.kinetic_energy_label = QLabel("Кинетическая: 0.0")
+        energy_layout.addWidget(self.kinetic_energy_label)
+        
+        self.potential_energy_label = QLabel("Потенциальная: 0.0")
+        energy_layout.addWidget(self.potential_energy_label)
+        
+        stats_layout.addLayout(energy_layout)
+        
+        stats_tab.setLayout(stats_layout)
+        self.tabs.addTab(stats_tab, "Статистика")
+        
+        # Вкладка: Графики сходимости
+        graphs_tab = QWidget()
+        graphs_layout = QVBoxLayout()
+        
+        # График изменения энергии
+        self.energy_fig = Figure(figsize=(5, 3), dpi=100)
+        self.energy_canvas = FigureCanvas(self.energy_fig)
+        self.energy_ax = self.energy_fig.add_subplot(111)
+        self.energy_ax.set_title('Изменение энергии системы')
+        self.energy_ax.set_xlabel('Итерация')
+        self.energy_ax.set_ylabel('Энергия')
+        self.energy_ax.grid(True)
+        
+        graphs_layout.addWidget(self.energy_canvas)
+        
+        # График изменения коэффициента использования
+        self.utilization_fig = Figure(figsize=(5, 3), dpi=100)
+        self.utilization_canvas = FigureCanvas(self.utilization_fig)
+        self.utilization_ax = self.utilization_fig.add_subplot(111)
+        self.utilization_ax.set_title('Коэффициент использования материала')
+        self.utilization_ax.set_xlabel('Итерация')
+        self.utilization_ax.set_ylabel('η (%)')
+        self.utilization_ax.grid(True)
+        
+        graphs_layout.addWidget(self.utilization_canvas)
+        
+        graphs_tab.setLayout(graphs_layout)
+        self.tabs.addTab(graphs_tab, "Графики")
+        
+        # Вкладка: Лог событий
+        log_tab = QWidget()
+        log_layout = QVBoxLayout()
+        
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setFont(QFont("Courier", 8))
+        
+        log_layout.addWidget(QLabel("Лог событий:"))
+        log_layout.addWidget(self.log_text)
+        
+        # Кнопка очистки лога
+        clear_button = QPushButton("Очистить лог")
+        clear_button.clicked.connect(self.clear_log)
+        log_layout.addWidget(clear_button)
+        
+        log_tab.setLayout(log_layout)
+        self.tabs.addTab(log_tab, "Лог")
+        
+        layout.addWidget(self.tabs)
+        self.setLayout(layout)
+    
+    def update_agents_table(self, shapes_data: List[Dict]):
+        """Обновление таблицы фигур"""
+        self.agents_table.setRowCount(len(shapes_data))
+        
+        for i, shape in enumerate(shapes_data):
+            # ID
+            self.agents_table.setItem(i, 0, QTableWidgetItem(str(i+1)))
+            
+            # Имя
+            name = shape.get('name', f'Part_{i+1}')
+            self.agents_table.setItem(i, 1, QTableWidgetItem(name))
+            
+            # Приоритет
+            priority = shape.get('priority', 2)
+            self.agents_table.setItem(i, 2, QTableWidgetItem(str(priority)))
+            
+            # Положение
+            centroid = shape.get('centroid', (0, 0))
+            position = f"({centroid[0]:.1f}, {centroid[1]:.1f})"
+            self.agents_table.setItem(i, 3, QTableWidgetItem(position))
+            
+            # Угол
+            angle = shape.get('angle', 0)
+            self.agents_table.setItem(i, 4, QTableWidgetItem(f"{angle:.1f}°"))
+            
+            # Статус
+            status = "Размещена"
+            self.agents_table.setItem(i, 5, QTableWidgetItem(status))
+    
+    def update_energy_graphs(self, iterations: List[int], energies: List[float], utilizations: List[float]):
+        """Обновление графиков энергии и использования"""
+        if len(iterations) < 2:
+            return
+            
+        self.energy_ax.clear()
+        self.energy_ax.plot(iterations, energies, 'b-', linewidth=2)
+        self.energy_ax.set_title('Изменение энергии системы')
+        self.energy_ax.set_xlabel('Итерация')
+        self.energy_ax.set_ylabel('Энергия')
+        self.energy_ax.grid(True)
+        self.energy_canvas.draw()
+        
+        self.utilization_ax.clear()
+        self.utilization_ax.plot(iterations, utilizations, 'g-', linewidth=2)
+        self.utilization_ax.set_title('Коэффициент использования материала')
+        self.utilization_ax.set_xlabel('Итерация')
+        self.utilization_ax.set_ylabel('η (%)')
+        self.utilization_ax.grid(True)
+        self.utilization_canvas.draw()
+    
+    def update_energy_stats(self, total_energy: float, kinetic_energy: float, potential_energy: float):
+        """Обновление статистики энергии"""
+        self.total_energy_label.setText(f"Полная энергия: {total_energy:.2f}")
+        self.kinetic_energy_label.setText(f"Кинетическая: {kinetic_energy:.2f}")
+        self.potential_energy_label.setText(f"Потенциальная: {potential_energy:.2f}")
+    
+    def add_log_message(self, message: str):
+        """Добавление сообщения в лог"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.log_text.append(f"[{timestamp}] {message}")
+        self.log_text.verticalScrollBar().setValue(self.log_text.verticalScrollBar().maximum())
+    
+    def clear_log(self):
+        """Очистка лога"""
+        self.log_text.clear()
+
+
+class LoadFileDialog(QDialog):
+    """
+    Диалог для загрузки данных из файлов
+    """
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Загрузка данных")
+        self.setMinimumWidth(500)
+        
+        layout = QVBoxLayout()
+        
+        # Выбор файла
+        file_layout = QHBoxLayout()
+        file_layout.addWidget(QLabel("Файл данных:"))
+        
+        self.file_edit = QLineEdit()
+        file_layout.addWidget(self.file_edit)
+        
+        self.browse_button = QPushButton("Обзор...")
+        self.browse_button.clicked.connect(self.browse_file)
+        file_layout.addWidget(self.browse_button)
+        
+        layout.addLayout(file_layout)
+        
+        # Информация о файле
+        info_group = QGroupBox("Информация о файле")
+        info_layout = QVBoxLayout()
+        
+        self.file_info = QTextEdit()
+        self.file_info.setReadOnly(True)
+        self.file_info.setFixedHeight(100)
+        info_layout.addWidget(self.file_info)
+        
+        info_group.setLayout(info_layout)
+        layout.addWidget(info_group)
+        
+        # Настройки импорта
+        import_group = QGroupBox("Настройки импорта")
+        import_layout = QFormLayout()
+        
+        self.sheet_width = QDoubleSpinBox()
+        self.sheet_width.setRange(100, 10000)
+        self.sheet_width.setValue(2000)
+        import_layout.addRow("Ширина листа (мм):", self.sheet_width)
+        
+        self.sheet_height = QDoubleSpinBox()
+        self.sheet_height.setRange(100, 10000)
+        self.sheet_height.setValue(1000)
+        import_layout.addRow("Высота листа (мм):", self.sheet_height)
+        
+        self.tolerance_spin = QDoubleSpinBox()
+        self.tolerance_spin.setRange(0.01, 1.0)
+        self.tolerance_spin.setValue(0.1)
+        self.tolerance_spin.setSingleStep(0.01)
+        import_layout.addRow("Точность (мм):", self.tolerance_spin)
+        
+        import_group.setLayout(import_layout)
+        layout.addWidget(import_group)
+        
+        # Кнопки
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+        self.setLayout(layout)
+    
+    def browse_file(self):
+        """Выбор файла"""
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Выберите файл", "", 
+            "DXF Files (*.dxf);;STEP Files (*.step *.stp);;JSON Files (*.json);;All Files (*)"
+        )
+        
+        if filename:
+            self.file_edit.setText(filename)
+            self.update_file_info(filename)
+    
+    def update_file_info(self, filename: str):
+        """Обновление информации о файле"""
+        import os
+        
+        if not os.path.exists(filename):
+            self.file_info.setText("Файл не найден")
+            return
+        
+        # Получение информации о файле
+        file_size = os.path.getsize(filename) / 1024  # KB
+        file_ext = os.path.splitext(filename)[1].lower()
+        
+        info = f"Имя файла: {os.path.basename(filename)}\n"
+        info += f"Размер: {file_size:.1f} KB\n"
+        info += f"Тип: {file_ext.upper()[1:]}\n"
+        
+        if file_ext == '.dxf' or file_ext == '.step':
+            info += "Формат: CAD-файл с геометрией деталей"
+        elif file_ext == '.json':
+            info += "Формат: Конфигурационный файл"
+        
+        self.file_info.setText(info)
+
+
+class SplashScreen(QDialog):
+    """
+    Экран-заставка с описанием этапов запуска
+    """
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setMinimumSize(500, 400)
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout()
+        
+        # Основной контейнер с фоном
+        container = QFrame()
+        container.setStyleSheet("""
+            QFrame {
+                background-color: #2D2D2D;
+                border-radius: 15px;
+                border: 2px solid #5A9FD5;
+            }
+        """)
+        container_layout = QVBoxLayout()
+        
+        # Заголовок
+        title_label = QLabel("ИАГИ Клиент")
+        title_label.setStyleSheet("""
+            color: #FFFFFF;
+            font-size: 24px;
+            font-weight: bold;
+            padding: 20px;
+        """)
+        title_label.setAlignment(Qt.AlignCenter)
+        container_layout.addWidget(title_label)
+        
+        # Список этапов
+        self.steps_list = QListWidget()
+        self.steps_list.setStyleSheet("""
+            QListWidget {
+                background-color: transparent;
+                color: #E0E0E0;
+                font-size: 14px;
+                border: none;
+            }
+            QListWidget::item {
+                padding: 10px;
+                border-bottom: 1px solid #555555;
+            }
+            QListWidget::item:selected {
+                background-color: #5A9FD5;
+            }
+        """)
+        
+        stages = [
+            "⏳ Инициализация приложения...",
+            "📂 Загрузка настроек...",
+            "🔌 Подключение к серверу...",
+            "🎨 Применение темы...",
+            "✅ Готово к работе"
+        ]
+        
+        for stage in stages:
+            item = QListWidgetItem(stage)
+            self.steps_list.addItem(item)
+        
+        container_layout.addWidget(self.steps_list)
+        
+        # Индикатор прогресса
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                background-color: #3D3D3D;
+                border: 1px solid #555555;
+                border-radius: 5px;
+                text-align: center;
+                color: #FFFFFF;
+            }
+            QProgressBar::chunk {
+                background-color: #5A9FD5;
+                border-radius: 4px;
+            }
+        """)
+        container_layout.addWidget(self.progress_bar)
+        
+        # Статус
+        self.status_label = QLabel("Запуск...")
+        self.status_label.setStyleSheet("""
+            color: #AAAAAA;
+            font-size: 12px;
+            padding: 10px;
+        """)
+        self.status_label.setAlignment(Qt.AlignCenter)
+        container_layout.addWidget(self.status_label)
+        
+        container.setLayout(container_layout)
+        layout.addWidget(container)
+        
+        self.setLayout(layout)
+    
+    def update_step(self, step_index: int, progress: int, status_text: str):
+        """Обновление текущего шага"""
+        # Выделение текущего шага
+        for i in range(self.steps_list.count()):
+            item = self.steps_list.item(i)
+            if i == step_index:
+                self.steps_list.setCurrentItem(item)
+                item.setForeground(QColor("#5A9FD5"))
+            else:
+                item.setForeground(QColor("#E0E0E0"))
+        
+        self.progress_bar.setValue(progress)
+        self.status_label.setText(status_text)
+        QApplication.processEvents()
 
 
 class MainWindow(QMainWindow):
