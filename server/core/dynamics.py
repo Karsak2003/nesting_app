@@ -1,11 +1,18 @@
 import numpy as np
+from typing import Tuple, Any, Optional
+
 from scipy.spatial import distance
 
 class GravitationalDynamics:
     """
     Физическая модель на основе гравитационной имитации
     """
-    def __init__(self, gravity_strength=9.8, damping_linear=0.5, damping_angular=0.3):
+    def __init__(
+        self, 
+        gravity_strength: float = 9.8, 
+        damping_linear: float = 0.5, 
+        damping_angular: float = 0.3
+    ):
         """
         Инициализация физической модели
         :param gravity_strength: сила гравитации
@@ -15,11 +22,19 @@ class GravitationalDynamics:
         self.gravity_strength = gravity_strength
         self.damping_linear = damping_linear
         self.damping_angular = damping_angular
-        self.regularization_epsilon = 0.1  # мм
+        self.regularization_epsilon: float = 0.1  # мм
         
-    def calculate_repulsive_force(self, shape1, shape2, collision_detector, 
-                                 min_gap=0.0, repulsion_strength=200.0, exponent=2.0,
-                                 agent1=None, agent2=None):
+    def calculate_repulsive_force(
+        self, 
+        shape1: Any, 
+        shape2: Any, 
+        collision_detector: Any, 
+        min_gap: float = 0.0, 
+        repulsion_strength: float = 200.0, 
+        exponent: float = 2.0,
+        agent1: Optional[Any] = None, 
+        agent2: Optional[Any] = None
+    ) -> Tuple[np.ndarray, float]:
         """
         Расчет силы отталкивания между двумя фигурами
         """
@@ -63,7 +78,12 @@ class GravitationalDynamics:
         
         return force_vector, torque1
     
-    def calculate_boundary_forces(self, shape, sheet_size, min_gap=0.0):
+    def calculate_boundary_forces(
+        self, 
+        shape: Any, 
+        sheet_size: Tuple[float, float], 
+        min_gap: float = 0.0
+    ) -> Tuple[np.ndarray, float]:
         """
         Расчет сил отталкивания от границ листа
         """
@@ -123,7 +143,13 @@ class GravitationalDynamics:
             
         return forces, torque
     
-    def verlet_integration(self, agent, force, torque, dt=0.01):
+    def verlet_integration(
+        self, 
+        agent: Any, 
+        force: np.ndarray, 
+        torque: float, 
+        dt: float = 0.01
+    ) -> Any:
         """
         Численное интегрирование методом Верле с демпфированием
         """

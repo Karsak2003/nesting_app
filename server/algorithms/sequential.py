@@ -1,11 +1,20 @@
 import time
 import numpy as np
 import logging
+from typing import Tuple, Any, Optional, Callable
 
 logger = logging.getLogger(__name__)
 
-def sequential_placement(agents, sheet_size, collision_detector, dynamics, min_gap, 
-                         defect_zones=None, time_limit=600, progress_callback=None):
+def sequential_placement(
+    agents: list, 
+    sheet_size: Tuple[float, float], 
+    collision_detector: Any, 
+    dynamics: Any, 
+    min_gap: float, 
+    defect_zones: Optional[list] = None, 
+    time_limit: float = 600, 
+    progress_callback: Optional[Callable[[int, list, float], None]] = None
+) -> list:
     """
     Последовательный алгоритм размещения с учетом приоритетов
     
