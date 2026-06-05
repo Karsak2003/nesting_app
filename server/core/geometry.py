@@ -1,4 +1,6 @@
 ﻿import numpy as np
+from typing import Optional, List, Tuple, Any
+
 from shapely.geometry import Polygon, Point, LineString
 from shapely.affinity import rotate, translate
 
@@ -6,11 +8,13 @@ class PolygonShape:
     """
     Класс для представления геометрии фигуры с поддержкой отверстий
     """
-    def __init__(self, 
-                 outer_contour:list[tuple[int|float]], 
-                 inner_contours:list[tuple[int|float]]=None, 
-                 name:str="", 
-                 priority:int = None):
+    def __init__(
+        self, 
+        outer_contour: List[Tuple[int | float, int | float]], 
+        inner_contours: Optional[List[Tuple[int | float, int | float]]] = None, 
+        name: str = "", 
+        priority: Optional[int] = None
+    ):
         """
         Инициализация фигуры
         
@@ -28,7 +32,7 @@ class PolygonShape:
         self.update_geometry()
 
         
-    def update_geometry(self):
+    def update_geometry(self) -> None:
         """Обновление геометрических характеристик после изменений"""
         # Создание Shapely полигонов
         outer_polygon = Polygon(self.outer_contour)
@@ -54,12 +58,12 @@ class PolygonShape:
         self.centroid = np.array(self.polygon.centroid.coords[0])
         self.moment_of_inertia = self._calculate_moment_of_inertia()
         
-    def _calculate_moment_of_inertia(self):
+    def _calculate_moment_of_inertia(self) -> float:
         """Расчет момента инерции для фигуры"""
         # Упрощенный расчет для плоской фигуры
         return self.area * 100  # Пропорционально площади
         
-    def apply_transformation(self, position, angle):
+    def apply_transformation(self, position: Tuple[float, float], angle: float) -> 'PolygonShape':
         """
         Применение трансформации к фигуре
         :param position: (x, y) - позиция центра масс
@@ -88,7 +92,7 @@ class PolygonShape:
         # Создание новой фигуры с преобразованной геометрией
         return PolygonShape(transformed_outer, transformed_inners, self.name)
     
-    def get_bounding_box(self):
+    def get_bounding_box(self) -> Tuple[float, float, float, float]:
         """Получение ограничивающего прямоугольника"""
         min_x, min_y, max_x, max_y = self.polygon.bounds
         return (min_x, min_y, max_x, max_y)

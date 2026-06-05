@@ -1,11 +1,19 @@
 import numpy as np
+from typing import Optional, List, Tuple, Any
+
 
 class IAGIAgent:
     """
     Интеллектуальный агент гравитационной имитации (ИАГИ)
     Реализует архитектуру BDI (belief-desire-intention)
     """
-    def __init__(self, shape, position=None, angle=0.0, priority=1):
+    def __init__(
+        self, 
+        shape: Any, 
+        position: Optional[Tuple[float, float]] = None, 
+        angle: float = 0.0, 
+        priority: int = 1
+    ):
         """
         Инициализация ИАГИ агента
         :param shape: геометрия фигуры
@@ -43,7 +51,12 @@ class IAGIAgent:
         self.stagnation_counter = 0
         self.max_stagnation_steps = 100
         
-    def update_beliefs(self, neighbors, sheet_size, defects=None):
+    def update_beliefs(
+        self, 
+        neighbors: List[Any], 
+        sheet_size: Tuple[float, float], 
+        defects: Optional[List[Any]] = None
+    ) -> None:
         """
         Обновление знаний агента об окружающей среде (belief)
         """
@@ -51,7 +64,7 @@ class IAGIAgent:
         self.sheet_size = sheet_size
         self.defects = defects if defects else []
         
-    def compute_intention(self, collision_detector, dynamics):
+    def compute_intention(self, collision_detector: Any, dynamics: Any) -> Tuple[np.ndarray, float]:
         """
         Формирование намерений агента на основе текущего состояния (intention)
         """
@@ -94,7 +107,7 @@ class IAGIAgent:
 
         return total_force, total_torque
     
-    def adaptive_damping(self, velocity_threshold=1.0):
+    def adaptive_damping(self, velocity_threshold: float = 1.0) -> float:
         """
         Адаптивное демпфирование для стабилизации
         """
@@ -106,7 +119,7 @@ class IAGIAgent:
         
         return self.damping_linear
     
-    def apply_micro_displacement(self, max_displacement=1.0):
+    def apply_micro_displacement(self, max_displacement: float = 1.0) -> bool:
         """
         Микросмещение для выхода из локальных минимумов
         """
@@ -121,7 +134,7 @@ class IAGIAgent:
             return True
         return False
     
-    def get_transformed_shape(self):
+    def get_transformed_shape(self) -> Any:
         """
         Получение геометрии фигуры с учетом текущего положения и поворота
         """

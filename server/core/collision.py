@@ -1,4 +1,6 @@
 import numpy as np
+from typing import Tuple, Any, Optional
+
 from utils.bvh import BVHTree
 from utils.sdf import compute_sdf_field
 
@@ -6,16 +8,16 @@ class CollisionDetector:
     """
     Система обнаружения столкновений на основе SDF и BVH
     """
-    def __init__(self, resolution=0.5):
+    def __init__(self, resolution: float = 0.5):
         """
         Инициализация детектора столкновений
         :param resolution: разрешение для SDF поля в мм
         """
         self.resolution = resolution
-        self.bvh_tree = None
-        self.sdf_fields = {}
+        self.bvh_tree: Optional[BVHTree] = None
+        self.sdf_fields: dict = {}
         
-    def build_spatial_index(self, shapes, sheet_size):
+    def build_spatial_index(self, shapes: list, sheet_size: Tuple[float, float]) -> None:
         """
         Построение пространственного индекса для ускорения поиска
         :param shapes: список фигур на листе
@@ -36,7 +38,12 @@ class CollisionDetector:
                     bounds=(0, 0, sheet_size[0], sheet_size[1])
                 )
     
-    def find_nearby_shapes(self, shape, shapes, radius):
+    def find_nearby_shapes(
+        self, 
+        shape: Any, 
+        shapes: list, 
+        radius: float
+    ) -> list:
         """
         Поиск фигур в заданном радиусе
         :param shape: целевая фигура
@@ -51,7 +58,12 @@ class CollisionDetector:
         )
         return self.bvh_tree.query(search_box)
     
-    def calculate_min_distance(self, shape1, shape2, min_gap=0.0):
+    def calculate_min_distance(
+        self, 
+        shape1: Any, 
+        shape2: Any, 
+        min_gap: float = 0.0
+    ) -> Tuple[float, np.ndarray, np.ndarray, np.ndarray]:
         """
         Расчет минимального расстояния между двумя фигурами с учетом минимального зазора
         :param shape1, shape2: фигуры
@@ -101,7 +113,7 @@ class CollisionDetector:
         
         return effective_distance, closest_point1, closest_point2, normal_vector
     
-    def check_collision(self, shape1, shape2, min_gap=0.0):
+    def check_collision(self, shape1: Any, shape2: Any, min_gap: float = 0.0) -> bool:
         """
         Проверка столкновения с учетом минимального зазора
         :return: True если есть столкновение (расстояние < 0 с учетом зазора)
