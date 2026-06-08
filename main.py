@@ -31,15 +31,16 @@ from typing import List, Dict, Tuple, Optional, Any
 sys.path.insert(0, str(Path(__file__).parent / 'server'))
 
 # Основные компоненты системы (из server/)
-from core.geometry import PolygonShape
-from core.optimizer import PackingOptimizer
-from core.constraints import ConstraintManager
-from config.settings import get_config, load_profile
-from my_io.dxf_import import import_dxf
-from my_io.step_import import import_step
-from my_io.exporter import export_results
-from algorithms.hybrid import hybrid_optimization_factory
-from utils.polygonization import AdaptivePolygonizer
+
+from server.core.geometry import PolygonShape
+from server.core.optimizer import PackingOptimizer
+from server.core.constraints import ConstraintManager
+from server.config.settings import get_config, load_profile
+from server.my_io.dxf_import import import_dxf
+from server.my_io.step_import import import_step
+from server.my_io.exporter import export_results
+from server.algorithms.hybrid import hybrid_optimization_factory
+from server.utils.polygonization import AdaptivePolygonizer
 
 # Графический интерфейс (опционально) - legacy GUI
 try:
