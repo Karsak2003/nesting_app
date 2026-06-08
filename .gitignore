@@ -1,4 +1,8 @@
-```
+
 __pycache__/
 *.pyc
-```
+
+*.rar
+\.vscode
+*.log
+.gitignore
