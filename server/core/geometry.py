@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 from typing import Optional, List, Tuple, Any
 
 from shapely.geometry import Polygon, Point, LineString

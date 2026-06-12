@@ -1,9 +1,4 @@
 
-"""
-Модуль для распределения партии деталей по листам материалов
-Согласно разделу 3.4.1, гибридизация с глобальными метаэвристиками критична для оптимизации распределения
-"""
-
 import numpy as np
 import random
 import time
@@ -14,6 +9,11 @@ from core.optimizer import PackingOptimizer
 from core.constraints import ConstraintManager
 from algorithms.hybrid import HybridGeneticIAGI, HybridPSOIAGI
 import logging
+
+"""
+Модуль для распределения партии деталей по листам материалов
+Согласно разделу 3.4.1, гибридизация с глобальными метаэвристиками критична для оптимизации распределения
+"""
 
 logger = logging.getLogger(__name__)
 

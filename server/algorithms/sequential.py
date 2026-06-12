@@ -13,7 +13,7 @@ def sequential_placement(
     min_gap: float, 
     defect_zones: Optional[list] = None, 
     time_limit: float = 600, 
-    progress_callback: Optional[Callable[[int, list, float], None]] = None
+    progress_callback: Optional[Callable[[int, list, float, float], None]] = None
 ) -> list:
     """
     Последовательный алгоритм размещения с учетом приоритетов
@@ -139,7 +139,7 @@ def sequential_placement(
                         stable = False
             
             iteration += 1
-            if iteration % 20 == 0:
+            if iteration % 20 == 0:        
                 print(f"  Итерация {iteration}, max_velocity={max_velocity:.2f} мм/с")
                 
                 # Вызов callback для обновления прогресса
@@ -150,7 +150,17 @@ def sequential_placement(
                     max_y = max(a.get_transformed_shape().get_bounding_box()[3] for a in agents)
                     effective_area = sheet_size[0] * max_y if max_y > 0 else total_area
                     utilization = (total_area / effective_area) * 100 if effective_area > 0 else 0.0
-                    progress_callback(progress, agents, utilization)
+                    
+                    # <-- ДОБАВЛЕНО: Расчет текущей энергии системы для активных агентов группы
+                    current_energy = sum(
+                        0.5 * a.mass * np.linalg.norm(a.velocity)**2 + 
+                        0.5 * a.moment_of_inertia * (a.angular_velocity**2) + 
+                        a.mass * 9.8 * a.position[1]
+                        for a in group if not a.is_frozen
+                    )
+                    
+                    # Передаем 4 аргумента: progress, agents, utilization, energy
+                    progress_callback(progress, agents, utilization, current_energy)
                 
             # Проверка стабилизации группы
             if stable or max_velocity < 0.5:
@@ -170,6 +180,14 @@ def sequential_placement(
         max_y = max(a.get_transformed_shape().get_bounding_box()[3] for a in agents)
         effective_area = sheet_size[0] * max_y if max_y > 0 else total_area
         utilization = (total_area / effective_area) * 100 if effective_area > 0 else 0.0
-        progress_callback(100, agents, utilization)
+        
+        final_energy = sum(
+            0.5 * a.mass * np.linalg.norm(a.velocity)**2 + 
+            0.5 * a.moment_of_inertia * (a.angular_velocity**2) + 
+            a.mass * 9.8 * a.position[1]
+            for a in agents if not a.is_frozen
+        )
+        
+        progress_callback(100, agents, utilization, final_energy)
 
     return agents

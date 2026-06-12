@@ -2,35 +2,8 @@
 Серверная часть приложения ИАГИ на FastAPI
 Предоставляет API для оптимизации раскроя плоских деталей
 """
-
-import os
-import sys
-import time
-import json
-import logging
-import tempfile
-import shutil
-import uuid
-import threading
-from pathlib import Path
-from typing import List, Dict, Tuple, Optional, Any
-from contextlib import asynccontextmanager
-
-import numpy as np
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
-from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel, Field
-import uvicorn
-
-# Добавляем корень проекта в путь импорта
-sys.path.insert(0, str(Path(__file__).parent))
-
-# Импорт локальных модулей
-from app import (
-    PolygonShape, PackingOptimizer, ConstraintManager,
-    import_dxf, import_step, export_results, get_config, load_profile
-)
-
+import logging
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
@@ -41,6 +14,25 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger('IAGI-Server')
+
+from app import (
+    # --- Стандартные библиотеки ---
+    sys, os, time, json, threading, tempfile, shutil, uuid,
+    Path, List, Dict, Tuple, Optional, Any, asynccontextmanager,
+    
+    # --- Сторонние библиотеки ---
+    np, FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form,
+    JSONResponse, FileResponse, uvicorn,
+    
+    # --- Локальные модули (Core, IO, Config) ---
+    PolygonShape, PackingOptimizer, ConstraintManager, ProgressTracker,
+    import_dxf, import_step, export_results, get_config, load_profile
+)
+
+# Добавляем корень проекта в путь импорта
+sys.path.insert(0, str(Path(__file__).parent))
+
+
 
 # Хранилище задач оптимизации
 optimization_tasks: Dict[str, Dict[str, Any]] = {}
@@ -101,6 +93,7 @@ class TaskStatus(BaseModel):
     message: str
     utilization: Optional[float] = None
     error: Optional[str] = None
+    history: Optional[Dict[str, List]] = None
 
 
 class ShapeInfo(BaseModel):
@@ -141,12 +134,20 @@ def run_optimization_task(
     request: OptimizationRequest,
     constraint_manager: ConstraintManager
 ):
+    
     """Выполнение задачи оптимизации в фоновом режиме"""
     try:
         optimization_tasks[task_id]['status'] = 'running'
         optimization_tasks[task_id]['progress'] = 0
         
         start_time = time.time()
+        task_lock = threading.Lock()
+        
+        tracker = ProgressTracker(
+            task_id=task_id,
+            history_dict=optimization_tasks[task_id]['history'],
+            lock=task_lock
+        )
         
         # Создание оптимизатора
         optimizer = PackingOptimizer({
@@ -171,10 +172,9 @@ def run_optimization_task(
                 for shape in shapes
             ],
             use_original_positions=request.use_original_positions,
-            progress_callback=lambda progress, agents, utilization: update_task_progress(
-                task_id, progress, utilization
-            )
+            progress_callback=tracker
         )
+        
         
         # Подготовка результатов
         placements = []
@@ -248,13 +248,29 @@ def run_optimization_task(
             'message': f'Ошибка: {str(e)}'
         })
 
-
-def update_task_progress(task_id: str, progress: int, utilization: float):
-    """Обновление прогресса задачи"""
+#Old
+# def update_task_progress(task_id: str, progress: int, utilization: float):
+#     """Обновление прогресса задачи"""
+#     if task_id in optimization_tasks:
+#         optimization_tasks[task_id]['progress'] = min(100, progress)
+#         optimization_tasks[task_id]['utilization'] = utilization
+#
+#New
+def update_task_progress(task_id: str, progress: int, utilization: float, energy: float = 0.0):
+    """Обновление прогресса задачи и истории"""
     if task_id in optimization_tasks:
         optimization_tasks[task_id]['progress'] = min(100, progress)
         optimization_tasks[task_id]['utilization'] = utilization
-
+        
+        # Обновление истории (с прореживанием, чтобы не перегружать память и сеть)
+        hist = optimization_tasks[task_id]['history']
+        iteration_num = len(hist['iterations']) + 1
+        
+        # Сохраняем каждую 5-ю итерацию или если это последняя точка (progress == 100)
+        if iteration_num % 5 == 0 or progress >= 100:
+            hist['iterations'].append(iteration_num)
+            hist['energies'].append(round(energy, 4))
+            hist['utilizations'].append(round(utilization, 4))
 
 # === API Endpoints ===
 
@@ -337,7 +353,12 @@ async def start_optimization(
         'status': 'pending',
         'progress': 0,
         'message': 'Загрузка и обработка файла...',
-        'file_path': str(file_path)
+        'file_path': str(file_path),
+        'history': {                     # <--- ДОБАВЛЕНО
+            'iterations': [],
+            'energies': [],
+            'utilizations': []
+        }
     }
     
     try:
@@ -386,7 +407,8 @@ async def get_task_status(task_id: str):
         progress=task.get('progress', 0),
         message=task.get('message', ''),
         utilization=task.get('utilization'),
-        error=task.get('error')
+        error=task.get('error'),
+        history=task.get('history')
     )
 
 

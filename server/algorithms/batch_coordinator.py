@@ -1,9 +1,4 @@
 
-"""
-Модуль координации раскроя партии листовых материалов
-Согласно разделу 3.2.5, глобальная координация критична для достижения оптимальной плотности упаковки
-"""
-
 import time
 import numpy as np
 from typing import List, Dict,Tuple, Optional, Any
@@ -12,6 +7,11 @@ from algorithms.batch_distribution import BatchDistributionOptimizer
 from core.optimizer import PackingOptimizer
 from core.constraints import ConstraintManager
 import logging
+
+"""
+Модуль координации раскроя партии листовых материалов
+Согласно разделу 3.2.5, глобальная координация критична для достижения оптимальной плотности упаковки
+"""
 
 logger = logging.getLogger(__name__)
 

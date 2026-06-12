@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 from typing import List, Tuple, Optional, Any, Dict
 from collections import deque
 import math

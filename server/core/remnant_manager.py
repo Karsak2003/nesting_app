@@ -1,14 +1,14 @@
 
-"""
-Модуль учета остатков листовых материалов
-Согласно разделу 2.5.5, учет остатков критичен для минимизации отходов в промышленном производстве
-"""
-
 import numpy as np
 from typing import List, Dict, Tuple, Optional, Any
 from core.geometry import PolygonShape
 from core.sheet_batch import Sheet
 import logging
+
+"""
+Модуль учета остатков листовых материалов
+Согласно разделу 2.5.5, учет остатков критичен для минимизации отходов в промышленном производстве
+"""
 
 logger = logging.getLogger(__name__)
 

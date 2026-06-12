@@ -1,15 +1,16 @@
 
-"""
-Модуль для управления партией листовых материалов
-Согласно разделу 2.5.5 и 3.3.9, учет характеристик каждого листа критичен для промышленного применения
-"""
-
 import numpy as np
 from typing import List, Dict, Tuple, Optional, Any
 from core.geometry import PolygonShape
 from core.constraints import ConstraintManager
 import logging
 import uuid
+
+"""
+Модуль для управления партией листовых материалов
+Согласно разделу 2.5.5 и 3.3.9, учет характеристик каждого листа критичен для промышленного применения
+"""
+
 
 logger = logging.getLogger(__name__)
 

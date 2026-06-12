@@ -1,13 +1,14 @@
-"""
-Модуль управления приоритетами размещения
-Согласно разделу 3.3.3 и 2.5.4, приоритеты критичны для технологической корректности
-"""
 
 from typing import List, Dict, Tuple, Any, Optional
 from core.agent import IAGIAgent
 from core.constraints import ConstraintManager
 import logging
 import numpy as np
+
+"""
+Модуль управления приоритетами размещения
+Согласно разделу 3.3.3 и 2.5.4, приоритеты критичны для технологической корректности
+"""
 
 logger = logging.getLogger(__name__)
 

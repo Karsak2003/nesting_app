@@ -32,7 +32,7 @@ def parallel_placement(
     :param time_limit: Максимальное время работы алгоритма (секунды)
     :param energy_threshold: Порог сходимости по энергии
     :param stagnation_steps: Количество шагов для обнаружения стагнации
-    :param progress_callback: функция обратного вызова (progress, agents, utilization)
+    :param progress_callback: функция обратного вызова (progress, agents, utilization, energy)
     :return: Список агентов с финальными позициями
     """
     start_time = time.time()
@@ -175,7 +175,12 @@ def parallel_placement(
             if progress_callback:
                 # Расчет прогресса на основе времени
                 progress = min(int((elapsed / time_limit) * 100), 95)
-                progress_callback(progress, agents, utilization)
+                
+                # <-- ДОБАВЛЕНО: Расчет энергии через существующую функцию
+                current_energy = calculate_system_energy(agents)
+                
+                # Передаем 4 аргумента
+                progress_callback(progress, agents, utilization, current_energy)
 
         # 7. Экстренная остановка при превышении времени
         if (time.time() - start_time) > time_limit:
@@ -194,7 +199,9 @@ def parallel_placement(
     
     # Финальный вызов callback
     if progress_callback:
-        progress_callback(100, agents, final_utilization)
+        # <-- ДОБАВЛЕНО: Расчет финальной энергии
+        final_energy = calculate_system_energy(agents)
+        progress_callback(100, agents, final_utilization, final_energy)
     
     return agents
 

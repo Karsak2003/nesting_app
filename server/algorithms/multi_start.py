@@ -1,9 +1,4 @@
 
-"""
-Модуль многозапусковой стратегии для выхода из локальных минимумов
-Согласно разделу 3.5.4, многозапусковая стратегия критична для глобальной оптимизации
-"""
-
 import time
 import numpy as np
 from typing import List, Dict, Tuple, Any, Optional, Callable
@@ -11,6 +6,11 @@ from core.agent import IAGIAgent
 from core.optimizer import PackingOptimizer
 from core.constraints import ConstraintManager
 import logging
+
+"""
+Модуль многозапусковой стратегии для выхода из локальных минимумов
+Согласно разделу 3.5.4, многозапусковая стратегия критична для глобальной оптимизации
+"""
 
 logger = logging.getLogger(__name__)
 

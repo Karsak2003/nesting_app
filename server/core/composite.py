@@ -1,14 +1,15 @@
 
-"""
-Модуль для работы с составными фигурами (многосвязные области и составные геометрии)
-Согласно разделу 2.1.8, поддержка составных геометрий критична для промышленного внедрения
-"""
-
 import numpy as np
 from shapely.geometry import Polygon, MultiPolygon, Point
 from shapely.ops import unary_union
 from typing import List, Tuple, Optional, Dict, Any
 import logging
+
+
+"""
+Модуль для работы с составными фигурами (многосвязные области и составные геометрии)
+Согласно разделу 2.1.8, поддержка составных геометрий критична для промышленного внедрения
+"""
 
 logger = logging.getLogger(__name__)
 

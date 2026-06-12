@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import math
 from typing import List, Tuple, Dict, Optional, Any
 from core.geometry import PolygonShape

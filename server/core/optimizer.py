@@ -49,6 +49,29 @@ class PackingOptimizer:
         self.agents = []
         self.defect_zones = []
         self.result = None
+    
+    def calculate_system_energy(self) -> float:
+        """
+        Расчет полной энергии системы (Кинетическая + Потенциальная)
+        Согласно Главе 2.4 и 2.6 диссертации.
+        """
+        total_energy = 0.0
+        g = 9.8  # Условное ускорение свободного падения из GravitationalDynamics
+        
+        for agent in self.agents:
+            # 1. Кинетическая энергия: E_k = 0.5 * m * v^2 + 0.5 * I * omega^2
+            # (Предполагаем, что у agent есть velocity и angular_velocity, иначе берем 0)
+            v = np.linalg.norm(getattr(agent, 'velocity', [0, 0]))
+            omega = getattr(agent, 'angular_velocity', 0.0)
+            
+            e_kinetic = 0.5 * agent.mass * (v ** 2) + 0.5 * agent.shape.moment_of_inertia * (omega ** 2)
+            
+            # 2. Потенциальная энергия: E_p = m * g * y (стремление к нижней границе)
+            e_potential = agent.mass * g * agent.position[1]
+            
+            total_energy += (e_kinetic + e_potential)
+            
+        return total_energy
         
     def add_defect_zone(self, contour):
         """Добавление дефектной зоны на лист"""
