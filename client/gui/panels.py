@@ -206,6 +206,10 @@ class MonitoringPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.init_ui()
+        
+        self.history_iterations = []
+        self.history_energies = []
+        self.history_utilizations = []
 
     def init_ui(self):
         layout = QVBoxLayout()
@@ -223,8 +227,8 @@ class MonitoringPanel(QWidget):
         stats_layout.addWidget(self.tasks_table)
         
         self.agents_table = QTableWidget()
-        self.agents_table.setColumnCount(6)
-        self.agents_table.setHorizontalHeaderLabels(["ID", "Имя", "Приоритет", "Положение", "Угол", "Статус"])
+        self.agents_table.setColumnCount(7)
+        self.agents_table.setHorizontalHeaderLabels(["ID", "Имя", "Приоритет", "Позиция", "Угол", "Скорость", "Статус"])
         self.agents_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         stats_layout.addWidget(QLabel("Состояние фигур:"))
         stats_layout.addWidget(self.agents_table)
@@ -248,13 +252,31 @@ class MonitoringPanel(QWidget):
         self.energy_fig = Figure(figsize=(5, 3), dpi=100)
         self.energy_canvas = FigureCanvas(self.energy_fig)
         self.energy_ax = self.energy_fig.add_subplot(111)
-        self.energy_ax.set_title('Изменение энергии системы'); self.energy_ax.grid(True)
+        self.energy_ax.set_title('Диссипация энергии системы', fontsize=10)
+        self.energy_ax.set_xlabel('Итерация')
+        self.energy_ax.set_ylabel('Энергия (усл. ед.)')
+        self.energy_ax.grid(True, linestyle='--', alpha=0.7)
+        
+        # Инициализация линий (один раз!) для обновления через set_data
+        self.energy_line, = self.energy_ax.plot([], [], 'b-', linewidth=2, label='Полная энергия')
+        self.anomaly_line, = self.energy_ax.plot([], [], 'ro', markersize=6, label='Аномалия')
+        self.energy_ax.legend(loc='upper right', fontsize=8)
+        
         graphs_layout.addWidget(self.energy_canvas)
         
         self.utilization_fig = Figure(figsize=(5, 3), dpi=100)
         self.utilization_canvas = FigureCanvas(self.utilization_fig)
         self.utilization_ax = self.utilization_fig.add_subplot(111)
-        self.utilization_ax.set_title('Коэффициент использования'); self.utilization_ax.grid(True)
+        self.utilization_ax.set_title('Сходимость к оптимальной плотности', fontsize=10)
+        self.utilization_ax.set_xlabel('Итерация')
+        self.utilization_ax.set_ylabel('Использование материала (%)')
+        self.utilization_ax.set_ylim(0, 100)
+        self.utilization_ax.grid(True, linestyle='--', alpha=0.7)
+        
+        # Инициализация линии (один раз!)
+        self.utilization_line, = self.utilization_ax.plot([], [], 'g-', linewidth=2, label='η (коэффициент использования)')
+        self.utilization_ax.legend(loc='lower right', fontsize=8)
+        
         graphs_layout.addWidget(self.utilization_canvas)
         
         graphs_tab.setLayout(graphs_layout)
@@ -286,55 +308,160 @@ class MonitoringPanel(QWidget):
         self.tasks_table.setItem(0, 1, QTableWidgetItem(status))
         self.tasks_table.setItem(0, 2, QTableWidgetItem(f"{progress}%"))
         self.tasks_table.setItem(0, 3, QTableWidgetItem(message))
-
+        
     def update_agents_table(self, shapes_data: List[Dict]):
+        """
+        Обновление таблицы агентов из current_shapes.
+        
+        Формат shapes_data (согласно S-2 сервера):
+            - id: int
+            - name: str
+            - contour: List[List[float]]
+            - centroid: [x, y]
+            - angle: float
+            - priority: int
+            - is_frozen: bool
+            - velocity: [vx, vy]
+            - angular_velocity: float
+        """
+        
+        print(f"Передача в update_agents_table shapes_data: {shapes_data}")
+        
         if not shapes_data:
             self.agents_table.setRowCount(0)
+            print("shapes_data пустой")
             return
-            
-        self.agents_table.setRowCount(len(shapes_data))
-        for i, shape in enumerate(shapes_data):
-            self.agents_table.setItem(i, 0, QTableWidgetItem(str(i+1)))
-            self.agents_table.setItem(i, 1, QTableWidgetItem(shape.get('name', f'Part_{i+1}')))
-            self.agents_table.setItem(i, 2, QTableWidgetItem(str(shape.get('priority', 2))))
-            
-            centroid = shape.get('centroid', (0, 0))
-            # Обработка случая, когда centroid может быть списком или кортежем
-            cx = centroid[0] if isinstance(centroid, (list, tuple)) else 0
-            cy = centroid[1] if isinstance(centroid, (list, tuple)) else 0
-            self.agents_table.setItem(i, 3, QTableWidgetItem(f"({cx:.1f}, {cy:.1f})"))
-            
-            self.agents_table.setItem(i, 4, QTableWidgetItem(f"{shape.get('angle', 0):.1f}°"))
-            self.agents_table.setItem(i, 5, QTableWidgetItem("Активна" if not shape.get('is_frozen', False) else "Заморожена"))
-
-    def update_energy_graphs(self, iterations: List, energies: List[float], utilizations: List[float]):
-        if not iterations or len(iterations) < 2:
-            return
-        # 1. График энергии (согласно Главе 2.6.3, энергия должна монотонно убывать)
-        self.energy_ax.clear()
-        self.energy_ax.plot(iterations, energies, 'b-', linewidth=2, label='Полная энергия системы')
-        self.energy_ax.set_title('Диссипация энергии системы', fontsize=10)
-        self.energy_ax.set_xlabel('Итерация / Время (с)')
-        self.energy_ax.set_ylabel('Энергия (усл. ед.)')
-        self.energy_ax.legend(loc='upper right')
-        self.energy_ax.grid(True, linestyle='--', alpha=0.7)
-        self.energy_canvas.draw()
         
-        # 2. График использования (Коэффициент $\eta$ должен стремиться к максимуму)
-        self.utilization_ax.clear()
-        self.utilization_ax.plot(iterations, utilizations, 'g-', linewidth=2, label='Коэффициент использования ($\eta$)')
-        self.utilization_ax.set_title('Сходимость к оптимальной плотности', fontsize=10)
-        self.utilization_ax.set_xlabel('Итерация / Время (с)')
-        self.utilization_ax.set_ylabel('Использование материала (%)')
-        self.utilization_ax.set_ylim(0, 100) # Фиксируем ось для наглядности
-        self.utilization_ax.legend(loc='lower right')
-        self.utilization_ax.grid(True, linestyle='--', alpha=0.7)
-        self.utilization_canvas.draw()
-
+        # Отключаем обновление для массового заполнения (без мигания)
+        self.agents_table.setUpdatesEnabled(False)
+        
+        try:
+            self.agents_table.setRowCount(len(shapes_data))
+            for row, shape in enumerate(shapes_data):
+                # Колонка 0: ID
+                self.agents_table.setItem(
+                    row, 0, QTableWidgetItem(str(shape.get('id', row)))
+                )
+                
+                # Колонка 1: Имя
+                name = shape.get('name') or f"part_{shape.get('id', row) + 1}"
+                self.agents_table.setItem(row, 1, QTableWidgetItem(name))
+                
+                # Колонка 2: Приоритет
+                self.agents_table.setItem(
+                    row, 2, QTableWidgetItem(str(shape.get('priority', 2)))
+                )
+                
+                # Колонка 3: Позиция (centroid)
+                centroid = shape.get('centroid') or [0, 0]
+                if isinstance(centroid, (list, tuple)) and len(centroid) >= 2:
+                    cx, cy = centroid[0], centroid[1]
+                else:
+                    cx, cy = 0.0, 0.0
+                self.agents_table.setItem(
+                    row, 3, QTableWidgetItem(f"({cx:.1f}, {cy:.1f})")
+                )
+                
+                # Колонка 4: Угол
+                angle = shape.get('angle', 0.0) or 0.0
+                self.agents_table.setItem(
+                    row, 4, QTableWidgetItem(f"{angle:.1f}°")
+                )
+                
+                # Колонка 5: Скорость (норма вектора ‖v‖ = √(vx² + vy²))
+                velocity = shape.get('velocity') or [0, 0]
+                if isinstance(velocity, (list, tuple)) and len(velocity) >= 2:
+                    v_norm = (velocity[0]**2 + velocity[1]**2) ** 0.5
+                else:
+                    v_norm = 0.0
+                self.agents_table.setItem(
+                    row, 5, QTableWidgetItem(f"{v_norm:.2f}")
+                )
+                
+                # Колонка 6: Статус (с иконкой 🔒 для frozen)
+                is_frozen = shape.get('is_frozen', False)
+                status_text = "🔒 frozen" if is_frozen else "▶ active"
+                self.agents_table.setItem(row, 6, QTableWidgetItem(status_text))
+        finally:
+            self.agents_table.setUpdatesEnabled(True)
+            
+    def reset_history(self):
+        """Сброс локальной истории (вызывается при reset_task)"""
+        self.history_iterations = []
+        self.history_energies = []
+        self.history_utilizations = []
+    
+    def update_energy_graphs(self, iterations: List, energies: List[float], utilizations: List[float]):
+        """
+        Обновление графиков энергии и утилизации БЕЗ МИГАНИЯ.
+        Согласно Главе 2.6.3 диссертации (Теорема 1), энергия должна
+        монотонно не возрастать (диссипативность системы).
+        
+        C-FIX-3: Накапливаем историю локально, сервер передаёт только дельту.
+        """
+        if not iterations:
+            return
+        
+        # ← НОВОЕ (C-FIX-3): Накапливаем историю локально
+        self.history_iterations.extend(iterations)
+        self.history_energies.extend(energies)
+        self.history_utilizations.extend(utilizations)
+        
+        # Ограничиваем длину истории (последние 1000 точек для производительности)
+        max_points = 1000
+        if len(self.history_iterations) > max_points:
+            self.history_iterations = self.history_iterations[-max_points:]
+            self.history_energies = self.history_energies[-max_points:]
+            self.history_utilizations = self.history_utilizations[-max_points:]
+        
+        # === 1. График энергии (set_data вместо clear+plot) ===
+        self.energy_line.set_data(self.history_iterations, self.history_energies)
+        
+        # Проверка монотонности: если энергия выросла >1% — это аномалия
+        # (допустимы только численные флуктуации <1%)
+        anomalies_x, anomalies_y = [], []
+        for i in range(1, len(self.history_energies)):
+            if self.history_energies[i] > self.history_energies[i-1] * 1.01:
+                anomalies_x.append(self.history_iterations[i])
+                anomalies_y.append(self.history_energies[i])
+        
+        self.anomaly_line.set_data(anomalies_x, anomalies_y)
+        
+        # Авто-масштабирование осей
+        self.energy_ax.relim()
+        self.energy_ax.autoscale_view()
+        
+        # Перерисовка БЕЗ МИГАНИЯ (draw_idle вместо draw)
+        self.energy_canvas.draw_idle()
+        
+        # === 2. График утилизации (set_data вместо clear+plot) ===
+        self.utilization_line.set_data(self.history_iterations, self.history_utilizations)
+        
+        # Авто-масштаб только по X, Y фиксирован [0, 100]
+        self.utilization_ax.relim()
+        self.utilization_ax.autoscale_view()
+        self.utilization_canvas.draw_idle()
+       
     def update_energy_stats(self, total_energy: float, kinetic_energy: float, potential_energy: float):
         self.total_energy_label.setText(f"Полная энергия: {total_energy:.2f}")
         self.kinetic_energy_label.setText(f"Кинетическая: {kinetic_energy:.2f}")
         self.potential_energy_label.setText(f"Потенциальная: {potential_energy:.2f}")
+    
+    def reset_graphs(self):
+        """Сброс графиков к начальному состоянию (вызывается при reset_task)"""
+        
+        self.reset_history()
+        
+        self.energy_line.set_data([], [])
+        self.anomaly_line.set_data([], [])
+        self.energy_ax.relim()
+        self.energy_ax.autoscale_view()
+        self.energy_canvas.draw_idle()
+        
+        self.utilization_line.set_data([], [])
+        self.utilization_ax.relim()
+        self.utilization_ax.autoscale_view(axis='x')
+        self.utilization_canvas.draw_idle()
     #endregion
 
     #region Log Management

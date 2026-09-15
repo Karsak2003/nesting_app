@@ -2,6 +2,7 @@ import time
 import numpy as np
 import logging
 from typing import Tuple, Any, Optional, Callable
+from algorithms.parallel import calculate_system_energy
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,8 @@ def sequential_placement(
                 
                 # Интегрирование уравнений движения
                 prev_position = agent.position.copy()
-                dynamics.verlet_integration(agent, force, torque, dt=0.08)  # Увеличен шаг для ускорения (было 0.05)
+                dt = 0.04 if max_velocity > 50.0 else 0.08
+                dynamics.verlet_integration(agent, force, torque, dt=dt)  # Увеличен шаг для ускорения (было 0.05)
                 
                 # Проверка стабильности
                 movement = np.linalg.norm(agent.position - prev_position)
@@ -128,39 +130,55 @@ def sequential_placement(
                         'height': bbox[3] - bbox[1]
                     })
                 
-                # Проверка столкновений
+                # Проверка столкновений с принудительным разделением
                 transformed_shape = agent.get_transformed_shape()
                 for other_agent in agents:
-                    if other_agent is agent or other_agent.is_frozen:
+                    if (other_agent is agent) or other_agent.is_frozen:
                         continue
                         
                     other_shape = other_agent.get_transformed_shape()
                     if collision_detector.check_collision(transformed_shape, other_shape, min_gap):
                         stable = False
+                        # Принудительное разделение коллидирующих фигур
+                        distance, cp1, cp2, normal = collision_detector.calculate_min_distance(
+                            transformed_shape, other_shape, min_gap
+                        )
+                        if distance < min_gap:
+                            penetration = min_gap - distance
+                            # Смещение пропорционально массам
+                            total_mass = agent.mass + other_agent.mass
+                            if total_mass > 0:
+                                ratio1 = other_agent.mass / total_mass
+                                ratio2 = agent.mass / total_mass
+                            else:
+                                ratio1 = ratio2 = 0.5
+                            
+                            displacement = normal * (penetration + min_gap) * 0.5
+                            agent.position += displacement * ratio1
+                            other_agent.position -= displacement * ratio2
             
             iteration += 1
-            if iteration % 20 == 0:        
+
+            # Логирование каждые 20 итераций (для консоли) — БЕЗ изменения
+            if iteration % 20 == 0:
                 print(f"  Итерация {iteration}, max_velocity={max_velocity:.2f} мм/с")
+            
+            # Вызов callback на КАЖДОЙ итерации (без прореживания!)
+            if progress_callback:
+                # Расчёт текущего прогресса
+                progress = int((completed_groups + (iteration / max_iterations)) / total_groups * 100)
                 
-                # Вызов callback для обновления прогресса
-                if progress_callback:
-                    # Расчет текущего прогресса и утилизации
-                    progress = int((completed_groups + (iteration / max_iterations)) / total_groups * 100)
-                    total_area = sum(a.shape.area for a in agents)
-                    max_y = max(a.get_transformed_shape().get_bounding_box()[3] for a in agents)
-                    effective_area = sheet_size[0] * max_y if max_y > 0 else total_area
-                    utilization = (total_area / effective_area) * 100 if effective_area > 0 else 0.0
-                    
-                    # <-- ДОБАВЛЕНО: Расчет текущей энергии системы для активных агентов группы
-                    current_energy = sum(
-                        0.5 * a.mass * np.linalg.norm(a.velocity)**2 + 
-                        0.5 * a.moment_of_inertia * (a.angular_velocity**2) + 
-                        a.mass * 9.8 * a.position[1]
-                        for a in group if not a.is_frozen
-                    )
-                    
-                    # Передаем 4 аргумента: progress, agents, utilization, energy
-                    progress_callback(progress, agents, utilization, current_energy)
+                # Расчёт утилизации
+                total_area = sum(a.shape.area for a in agents)
+                max_y = max(a.get_transformed_shape().get_bounding_box()[3] for a in agents)
+                effective_area = sheet_size[0] * max_y if max_y > 0 else total_area
+                utilization = (total_area / effective_area) * 100 if effective_area > 0 else 0.0
+                
+                # Расчёт энергии через унифицированную функцию из parallel.py
+                current_energy = calculate_system_energy(agents)
+                
+                # Передаём 4 аргумента: progress, agents, utilization, energy
+                progress_callback(progress, agents, utilization, current_energy)
                 
             # Проверка стабилизации группы
             if stable or max_velocity < 0.5:
@@ -181,12 +199,7 @@ def sequential_placement(
         effective_area = sheet_size[0] * max_y if max_y > 0 else total_area
         utilization = (total_area / effective_area) * 100 if effective_area > 0 else 0.0
         
-        final_energy = sum(
-            0.5 * a.mass * np.linalg.norm(a.velocity)**2 + 
-            0.5 * a.moment_of_inertia * (a.angular_velocity**2) + 
-            a.mass * 9.8 * a.position[1]
-            for a in agents if not a.is_frozen
-        )
+        final_energy = calculate_system_energy(agents)
         
         progress_callback(100, agents, utilization, final_energy)
 

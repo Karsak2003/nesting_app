@@ -3,10 +3,14 @@ from typing import Tuple, Any, Optional
 
 from scipy.spatial import distance
 
+C_interaction_radius:float = 100.0 # по умолчанию 25
+
+
 class GravitationalDynamics:
     """
     Физическая модель на основе гравитационной имитации
     """
+    
     def __init__(
         self, 
         gravity_strength: float = 9.8, 
@@ -41,14 +45,17 @@ class GravitationalDynamics:
         distance, cp1, cp2, normal = collision_detector.calculate_min_distance(
             shape1, shape2, min_gap
         )
-
-        interaction_radius = min_gap + 25.0
+         
+        interaction_radius = max(100.0, min_gap * 3.0)
         if distance > interaction_radius:
             return np.array([0.0, 0.0]), 0.0
 
         if distance < min_gap:
             penetration = min_gap - distance
-            force_magnitude = repulsion_strength * penetration * 3.0
+            # Усиленная сила при проникновении: квадратичная зависимость
+            force_magnitude = repulsion_strength * (penetration ** 2) * 5.0
+            # Увеличиваем максимальную силу для разделения глубоко проникших фигур
+            max_force = 5000.0  # было 1000.0
         else:
             effective_distance = max(distance, self.regularization_epsilon)
             base_force = repulsion_strength / (effective_distance ** 2)
@@ -65,7 +72,7 @@ class GravitationalDynamics:
                 force_magnitude *= velocity_factor
         
         # Ограничение максимальной силы для численной устойчивости
-        max_force = 1000.0
+        max_force = 5000.0 if distance < 0 else 1000.0  # Усиленная сила при проникновении
         force_magnitude = min(force_magnitude, max_force)
         
         # Направление силы отталкивания
@@ -130,7 +137,7 @@ class GravitationalDynamics:
             forces[1] += force_magnitude
         elif min_y > min_gap:
             distance_to_bottom = min_y - min_gap
-            base_gravity = self.gravity_strength * shape.area * 0.08  # Увеличено с 0.05
+            base_gravity = self.gravity_strength * shape.area * 0.04  # Увеличено с 0.05
             distance_factor = (distance_to_bottom / 100.0) ** 1.5
             additional_gravity = distance_factor * shape.area * 0.25  # Увеличено с 0.15
             force_magnitude = base_gravity + additional_gravity

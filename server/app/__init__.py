@@ -42,6 +42,8 @@ __all__ = [
     'import_dxf', 'import_step', 'export_results',
     # Config
     'get_config', 'load_profile', 'save_profile'
+    #Utils
+    'ProgressTracker'
 ]
 
 def __getattr__(name: str) -> Any:
@@ -59,7 +61,7 @@ def __getattr__(name: str) -> Any:
         case "uvicorn":
             import uvicorn
             return uvicorn
-        case "FastAPI" | "UploadFile" | "File" | "Form" | "HTTPException" | "BackgroundTasks":
+        case "FastAPI" | "UploadFile" | "File" | "Form" | "HTTPException" | "BackgroundTasks"| "Query":
             import fastapi
             return getattr(fastapi, name)
         case "JSONResponse" | "FileResponse":
@@ -155,7 +157,11 @@ def __getattr__(name: str) -> Any:
             from config.settings import save_profile
             return save_profile
         #endregion IO и Config
-        
+        #region Utils
+        case "ProgressTracker":
+            from utils.progress_tracker import ProgressTracker
+            return ProgressTracker
+        #endregion Utils
         # --- Обработка неизвестных атрибутов ---
         case _:
             raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

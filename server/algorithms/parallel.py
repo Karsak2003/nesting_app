@@ -171,16 +171,13 @@ def parallel_placement(
                   f"max_vel={max_velocity:.2f}, утилизация={utilization:.2f}%, "
                   f"время={elapsed:.1f}/{time_limit:.0f}с")
             
-            # Вызов callback для обновления прогресса
-            if progress_callback:
-                # Расчет прогресса на основе времени
-                progress = min(int((elapsed / time_limit) * 100), 95)
-                
-                # <-- ДОБАВЛЕНО: Расчет энергии через существующую функцию
-                current_energy = calculate_system_energy(agents)
-                
-                # Передаем 4 аргумента
-                progress_callback(progress, agents, utilization, current_energy)
+        # Вызов callback для обновления прогресса
+        if progress_callback:
+            elapsed = time.time() - start_time
+            progress = min(int((elapsed / time_limit) * 100), 99)
+            utilization = calculate_material_utilization(agents, sheet_size)
+            current_energy = calculate_system_energy(agents)
+            progress_callback(progress, agents, utilization, current_energy)
 
         # 7. Экстренная остановка при превышении времени
         if (time.time() - start_time) > time_limit:
@@ -207,27 +204,34 @@ def parallel_placement(
 
 def calculate_system_energy(agents: List[IAGIAgent]) -> float:
     """
-    Расчет общей энергии системы для критерия сходимости
-    
-    :param agents: Список агентов
-    :return: Значение общей энергии системы
+    Расчет полной энергии системы согласно формуле (2.64) диссертации:
+    E = K + U, где
+    K = Σ(0.5·mᵢ·‖vᵢ² + 0.5·Iᵢ·ωᵢ²) — кинетическая (формула 2.50)
+    U = Σ(mᵢ·g·y) — гравитационная потенциальная (формула 2.32)
     """
     total_energy = 0.0
+    g = 9.8
     
     for agent in agents:
-        if agent.is_frozen:
+        if getattr(agent, 'is_frozen', False):
             continue
         
-        # Потенциальная энергия (высота над нижней границей)
-        potential_energy = agent.mass * 9.8 * agent.position[1]
+        # Поступательная кинетическая энергия
+        v = getattr(agent, 'velocity', np.array([0.0, 0.0]))
+        v_norm = float(np.linalg.norm(v))
+        e_kinetic_trans = 0.5 * agent.mass * (v_norm ** 2)
         
-        # Кинетическая энергия
-        kinetic_energy = 0.5 * agent.mass * np.linalg.norm(agent.velocity) ** 2
+        # Вращательная кинетическая энергия
+        # ВАЖНО: момент инерции — у ФИГУРЫ, не у агента!
+        omega = float(getattr(agent, 'angular_velocity', 0.0))
+        I = float(agent.shape.moment_of_inertia)  # ✅ ИСПРАВЛЕНО
+        e_kinetic_rot = 0.5 * I * (omega ** 2)
         
-        # Энергия вращения
-        rotational_energy = 0.5 * agent.moment_of_inertia * agent.angular_velocity ** 2
+        # Гравитационная потенциальная энергия
+        y = float(agent.position[1])
+        e_potential = agent.mass * g * y
         
-        total_energy += potential_energy + kinetic_energy + rotational_energy
+        total_energy += (e_kinetic_trans + e_kinetic_rot + e_potential)
     
     return total_energy
 

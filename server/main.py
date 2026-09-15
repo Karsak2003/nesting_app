@@ -2,8 +2,22 @@
 Серверная часть приложения ИАГИ на FastAPI
 Предоставляет API для оптимизации раскроя плоских деталей
 """
+import sys, asyncio
+
+if sys.platform == "win32":
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        print("[IAGI] Ok: Установлен WindowsSelectorEventLoopPolicy", flush=True)
+    except Exception as e:
+        print(f"[IAGI] WARNING: Не удалось установить SelectorEventLoop: {e}", flush=True)
+
 from pydantic import BaseModel, Field
+from pathlib import Path
 import logging
+
+# Добавляем корень проекта в путь импорта
+sys.path.insert(0, str(Path(__file__).parent))
+
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
@@ -17,21 +31,17 @@ logger = logging.getLogger('IAGI-Server')
 
 from app import (
     # --- Стандартные библиотеки ---
-    sys, os, time, json, threading, tempfile, shutil, uuid,
-    Path, List, Dict, Tuple, Optional, Any, asynccontextmanager,
+    os, time, json, threading, tempfile, shutil, uuid,
+    List, Dict, Tuple, Optional, Any, asynccontextmanager,
     
     # --- Сторонние библиотеки ---
-    np, FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form,
+    np, FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form, Query,
     JSONResponse, FileResponse, uvicorn,
     
     # --- Локальные модули (Core, IO, Config) ---
     PolygonShape, PackingOptimizer, ConstraintManager, ProgressTracker,
     import_dxf, import_step, export_results, get_config, load_profile
 )
-
-# Добавляем корень проекта в путь импорта
-sys.path.insert(0, str(Path(__file__).parent))
-
 
 
 # Хранилище задач оптимизации
@@ -41,23 +51,32 @@ optimization_tasks: Dict[str, Dict[str, Any]] = {}
 TEMP_DIR = Path(tempfile.gettempdir()) / 'iagi_server'
 TEMP_DIR.mkdir(exist_ok=True)
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Управление жизненным циклом приложения"""
-    logger.info("Запуск сервера ИАГИ...")
+    # Диагностика event loop
+    loop = asyncio.get_running_loop()
+    loop_type = type(loop).__name__
+    logger.info(f"Запуск сервера ИАГИ...")
+    logger.info(f"[ДИАГНОСТИКА] Event loop: {loop_type}")
+    logger.info(f"[ДИАГНОСТИКА] Python: {sys.version}")
+    logger.info(f"[ДИАГНОСТИКА] Platform: {sys.platform}")
+    
+    if sys.platform == "win32" and "Selector" not in loop_type:
+        logger.warning(
+            f"[ДИАГНОСТИКА] WARNING: Используется {loop_type}, а не SelectorEventLoop! "
+            f"Это может вызывать WinError 10014."
+        )
+    
     yield
     logger.info("Остановка сервера ИАГИ...")
-    # Очистка временных файлов
-    if TEMP_DIR.exists():
-        shutil.rmtree(TEMP_DIR, ignore_errors=True)
 
 
 app = FastAPI(
-    title="ИАГИ API",
+    title=      "ИАГИ API",
     description="API для интеллектуального агента гравитационной имитации раскроя",
-    version="1.0.0",
-    lifespan=lifespan
+    version=    "1.0.0",
+    lifespan=   lifespan
 )
 
 
@@ -65,14 +84,16 @@ app = FastAPI(
 
 class OptimizationRequest(BaseModel):
     """Запрос на оптимизацию"""
-    profile: str = Field(default='medium_precision', description='Профиль конфигурации')
-    algorithm: str = Field(default='sequential', description='Алгоритм размещения')
-    technology: str = Field(default='laser', description='Технология резки')
-    min_gap: float = Field(default=0.5, description='Минимальный зазор (мм)')
-    time_limit: int = Field(default=300, description='Лимит времени (секунды)')
-    sheet_width: float = Field(default=2000.0, description='Ширина листа (мм)')
-    sheet_height: float = Field(default=1000.0, description='Высота листа (мм)')
-    use_original_positions: bool = Field(default=True, description='Использовать исходные позиции')
+    profile:                    str =   Field(default='medium_precision', description='Профиль конфигурации')
+    algorithm:                  str =   Field(default='sequential', description='Алгоритм размещения')
+    technology:                 str =   Field(default='laser', description='Технология резки')
+    min_gap:                    float = Field(default=0.5, description='Минимальный зазор (мм)')
+    time_limit:                 int =   Field(default=300, description='Лимит времени (секунды)')
+    sheet_width:                float = Field(default=2000.0, description='Ширина листа (мм)')
+    sheet_height:               float = Field(default=1000.0, description='Высота листа (мм)')
+    use_original_positions:     bool =  Field(default=True, description='Использовать исходные позиции')
+    history_sample_rate:        int =   Field( default=5, description='Сохранять снимок current_shapes каждые N итераций')
+    progress_callback_interval: int =   Field( default=20, description='Частота записи в history (в итерациях симуляции)' )
 
 
 class OptimizationResponse(BaseModel):
@@ -94,6 +115,7 @@ class TaskStatus(BaseModel):
     utilization: Optional[float] = None
     error: Optional[str] = None
     history: Optional[Dict[str, List]] = None
+    current_shapes: Optional[List[Dict[str, Any]]] = None  # <-- НОВОЕ: снимок фигур
 
 
 class ShapeInfo(BaseModel):
@@ -145,8 +167,10 @@ def run_optimization_task(
         
         tracker = ProgressTracker(
             task_id=task_id,
-            history_dict=optimization_tasks[task_id]['history'],
-            lock=task_lock
+            task_dict=optimization_tasks[task_id],      # ✅ Передаём весь словарь задачи
+            lock=task_lock,
+            snapshot_interval=request.history_sample_rate,       # ✅ Частота снимков
+            callback_interval=request.progress_callback_interval # ✅ Частота записи в history
         )
         
         # Создание оптимизатора
@@ -201,12 +225,10 @@ def run_optimization_task(
             max_x = max(max_x, x_max)
             max_y = max(max_y, y_max)
         
-        if max_x > min_x and max_y > min_y:
-            effective_area = (max_x - min_x) * (max_y - min_y)
-        else:
-            effective_area = request.sheet_width * request.sheet_height
+        # Утилизация считается относительно площади листа, а не bounding box фигур
+        sheet_area = request.sheet_width * request.sheet_height
+        utilization = (total_area / sheet_area) * 100 if sheet_area > 0 else 0.0
         
-        utilization = (total_area / effective_area) * 100 if effective_area > 0 else 0.0
         execution_time = time.time() - start_time
         
         # Экспорт результатов во временную директорию
@@ -248,14 +270,7 @@ def run_optimization_task(
             'message': f'Ошибка: {str(e)}'
         })
 
-#Old
-# def update_task_progress(task_id: str, progress: int, utilization: float):
-#     """Обновление прогресса задачи"""
-#     if task_id in optimization_tasks:
-#         optimization_tasks[task_id]['progress'] = min(100, progress)
-#         optimization_tasks[task_id]['utilization'] = utilization
-#
-#New
+
 def update_task_progress(task_id: str, progress: int, utilization: float, energy: float = 0.0):
     """Обновление прогресса задачи и истории"""
     if task_id in optimization_tasks:
@@ -298,15 +313,17 @@ async def health_check():
 
 @app.post("/api/optimize", response_model=OptimizationResponse)
 async def start_optimization(
-    file: UploadFile = File(..., description="Файл с фигурами (DXF, STEP)"),
-    profile: str = Form(default='medium_precision'),
-    algorithm: str = Form(default='sequential'),
-    technology: str = Form(default='laser'),
-    min_gap: float = Form(default=0.5),
-    time_limit: int = Form(default=300),
-    sheet_width: float = Form(default=2000.0),
-    sheet_height: float = Form(default=1000.0),
-    use_original_positions: bool = Form(default=True)
+    file:                       UploadFile = File(..., description="Файл с фигурами (DXF, STEP)"),
+    profile:                    str =        Form(default='medium_precision'),
+    algorithm:                  str =        Form(default='sequential'),
+    technology:                 str =        Form(default='laser'),
+    min_gap:                    float =      Form(default=0.5),
+    time_limit:                 int =        Form(default=300),
+    sheet_width:                float =      Form(default=2000.0),
+    sheet_height:               float =      Form(default=1000.0),
+    use_original_positions:     bool =       Form(default=True),
+    history_sample_rate:        int =        Form(default=5),
+    progress_callback_interval: int =        Form(default=20)
 ):
     """
     Запуск оптимизации раскроя
@@ -344,7 +361,9 @@ async def start_optimization(
         time_limit=time_limit,
         sheet_width=sheet_width,
         sheet_height=sheet_height,
-        use_original_positions=use_original_positions
+        use_original_positions=use_original_positions,
+        history_sample_rate=history_sample_rate,          
+        progress_callback_interval=progress_callback_interval  
     )
     
     # Инициализация задачи
@@ -358,7 +377,8 @@ async def start_optimization(
             'iterations': [],
             'energies': [],
             'utilizations': []
-        }
+        },
+        'current_shapes': None
     }
     
     try:
@@ -374,12 +394,17 @@ async def start_optimization(
         constraint_manager.set_technology(request.technology)
         
         # Запуск фонового задания
-        thread = threading.Thread(
-            target=run_optimization_task,
-            args=(task_id, shapes, request, constraint_manager)
-        )
-        thread.daemon = True
-        thread.start()
+        async def _run_background():
+            """Обёртка для запуска синхронной задачи в отдельном потоке"""
+            try:
+                await asyncio.to_thread(
+                    run_optimization_task,
+                    task_id, shapes, request, constraint_manager
+                )
+            except Exception as e:
+                logger.error(f"Ошибка в фоновой задаче {task_id}: {e}")
+                
+        asyncio.create_task(_run_background())
         
         return OptimizationResponse(
             task_id=task_id,
@@ -395,12 +420,48 @@ async def start_optimization(
 
 
 @app.get("/api/status/{task_id}", response_model=TaskStatus)
-async def get_task_status(task_id: str):
-    """Получение статуса задачи оптимизации"""
+async def get_task_status(
+    task_id: str,
+    since_iteration: Optional[int] = Query(
+        default=None,
+        description="Вернуть историю только после этой итерации (дельта). "
+                    "Если не указан — возвращается полная история."
+    )
+):
+    """
+    Получение статуса задачи оптимизации.
+    Если указан since_iteration, возвращается только дельта истории 
+    (итерации > since_iteration), что уменьшает payload.
+    """
     if task_id not in optimization_tasks:
         raise HTTPException(status_code=404, detail="Задача не найдена")
     
     task = optimization_tasks[task_id]
+    history = task.get('history', {})
+    
+    # Если запрошена дельта — фильтруем историю
+    if (since_iteration is not None) and history:
+        iterations = history.get('iterations', [])
+        energies = history.get('energies', [])
+        utilizations = history.get('utilizations', [])
+        
+        # Находим индекс, с которого начинаются новые данные
+        start_idx = 0
+        for i, it in enumerate(iterations):
+            if it > since_iteration:
+                start_idx = i
+                break
+        
+        # Создаём дельту
+        history_delta = {
+            'iterations': iterations[start_idx:],
+            'energies': energies[start_idx:],
+            'utilizations': utilizations[start_idx:]
+        }
+    else:
+        # Возвращаем полную историю (для обратной совместимости)
+        history_delta = history
+    
     return TaskStatus(
         task_id=task['task_id'],
         status=task['status'],
@@ -408,9 +469,9 @@ async def get_task_status(task_id: str):
         message=task.get('message', ''),
         utilization=task.get('utilization'),
         error=task.get('error'),
-        history=task.get('history')
+        history=history_delta,
+        current_shapes=task.get('current_shapes')  # ← всегда возвращается
     )
-
 
 @app.get("/api/download/{task_id}/{format}")
 async def download_result(task_id: str, format: str):
@@ -532,4 +593,15 @@ async def get_algorithms():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    
+    config = uvicorn.Config(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        loop="asyncio",  # <-- Явное указание использовать стандартный asyncio loop
+        # loop="uvloop",  # Альтернатива: ultra-fast loop (требует pip install uvloop)
+    )
+    
+    server = uvicorn.Server(config)
+    
+    server.run()

@@ -11,7 +11,7 @@ setup(
         "matplotlib>=3.5.0",
         "numpy>=1.21.0",
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.9",
     entry_points={
         "console_scripts": [
             "iagi-client=main:main",

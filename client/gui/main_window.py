@@ -22,6 +22,7 @@ class MainWindow(QMainWindow):
         self.server_url = server_url or self.settings.value("server_url", "http://localhost:8000")
         self.current_theme = theme or self.settings.value("theme", "system")
         
+        self.last_iteration = 0
         # Импорт APIClient здесь, чтобы избежать циклических зависимостей
         try:
             from .api_client import APIClient, OptimizationThread
@@ -171,6 +172,7 @@ class MainWindow(QMainWindow):
         # 2. Очищаем внутренние данные
         self.current_task_id = None
         self.current_result_data = None
+        self.last_iteration = 0 
         
         # 3. Разблокируем интерфейс
         self.control_panel.enable_controls(True)
@@ -180,20 +182,12 @@ class MainWindow(QMainWindow):
         self.monitoring_panel.tasks_table.setRowCount(0)
         self.monitoring_panel.agents_table.setRowCount(0)
         self.monitoring_panel.clear_log()
-        
-        # 5. Очищаем графики
-        self.monitoring_panel.energy_ax.clear()
-        self.monitoring_panel.energy_ax.set_title('Изменение энергии системы')
-        self.monitoring_panel.energy_ax.grid(True)
-        self.monitoring_panel.energy_canvas.draw()
-        
-        self.monitoring_panel.utilization_ax.clear()
-        self.monitoring_panel.utilization_ax.set_title('Коэффициент использования материала')
-        self.monitoring_panel.utilization_ax.grid(True)
-        self.monitoring_panel.utilization_canvas.draw()
+
+        # 5. Очищаем графики (атомарный сброс без пересоздания осей)
+        self.monitoring_panel.reset_graphs()
         
         # 6. Очищаем визуализацию
-        self.visualization.update_visualization([], 0.0)
+        self.visualization.reset() 
         
         self.log_message("Задача сброшена. Система готова к новой оптимизации.")
         self.statusBar().showMessage("Готов к работе")
@@ -218,7 +212,7 @@ class MainWindow(QMainWindow):
 
     def show_connection_dialog(self):
         dialog = ServerConnectionDialog(self, self.server_url, self.current_theme)
-        if dialog.exec_() == QDialog.DialogCode.Accepted:
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             self.server_url = dialog.get_server_url()
             self.settings.setValue("server_url", self.server_url)
             if self.api_client:
@@ -277,7 +271,9 @@ class MainWindow(QMainWindow):
                     time_limit=self.control_panel.time_spin.value(),
                     sheet_width=self.control_panel.sheet_width_spin.value(),
                     sheet_height=self.control_panel.sheet_height_spin.value(),
-                    use_original_positions=True
+                    use_original_positions=True,
+                    history_sample_rate=5,
+                    progress_callback_interval=20 
                 )
                 self.current_task_id = task_id
                 self.monitoring_panel.add_log_message(f"Задача запущена: {task_id}")
@@ -309,6 +305,12 @@ class MainWindow(QMainWindow):
     #region Optimization Callbacks
     def on_status_update(self, status: dict):
         """Обновление интерфейса при получении статуса от сервера (Реализация Предложения 3)"""
+        
+        current_shapes = status.get('current_shapes') or []
+        print(f"[DEBUG] Status update: {status.get('status')}")
+        print(f"[DEBUG] current_shapes: {len(current_shapes)} shapes")
+        print(f"[DEBUG] history: {status.get('history', {})}")
+        
         utilization = status.get('utilization', 0.0) or 0.0
         
         self.control_panel.update_progress(
@@ -331,11 +333,15 @@ class MainWindow(QMainWindow):
             status.get('message', '')
         )
         
-        # --- ИСПРАВЛЕНИЕ П.4: Обновление таблицы фигур ---
-        shapes = status.get('result', []) or status.get('current_shapes', [])
-        if shapes:
-            self.monitoring_panel.update_agents_table(shapes)
-            
+        # --- Обновление таблицы агентов (только из current_shapes) ---
+        current_shapes = status.get('current_shapes') or []
+        # print(f"Проверка current_shapes:{current_shapes}")
+        self.visualization.update_from_status(status)
+        
+        if current_shapes:
+            print("Вызов update_agents_table")
+            self.monitoring_panel.update_agents_table(current_shapes)
+
         # --- ИСПРАВЛЕНИЕ П.2 и П.3: Обновление графиков по событию ---
         # Ожидаем, что сервер в статусе возвращает историю: {'history': {'iterations': [...], 'energies': [...], 'utilizations': [...]}}
         history = status.get('history', {})
@@ -345,12 +351,9 @@ class MainWindow(QMainWindow):
                 history.get('energies', []),
                 history.get('utilizations', [])
             )
-    
-    # def on_status_update(self, status: dict):
-    #     utilization = status.get('utilization')
-    #     self.control_panel.update_progress(status.get('progress', 0), status.get('message', ''), utilization)
-    #     self.task_info.setText(f"ID задачи: {self.current_task_id}\nСтатус: {status.get('status', 'unknown')}\nПрогресс: {status.get('progress', 0)}%\nСообщение: {status.get('message', '')}")
-    #     self.monitoring_panel.update_task_status(self.current_task_id, status.get('status', 'unknown'), status.get('progress', 0), status.get('message', ''))
+        
+        
+        
 
     def on_optimization_finished(self, status: dict):
         self.monitoring_panel.add_log_message(f"Оптимизация завершена: {status.get('message', '')}")
@@ -419,4 +422,8 @@ class MainWindow(QMainWindow):
         self.monitoring_panel.add_log_message(message)
     
     def show_about(self):
-        QMessageBox.about(self, "О программе", "ИАГИ Клиент\n\nКлиентское приложение для системы оптимизации раскроя плоских деталей с использованием гравитационной имитации.\n\nВерсия 2.0\nПодключается к серверу ИАГИ через HTTP API\nВключает визуализацию результатов и мониторинг процесса")
+        QMessageBox.about(self, "О программе", "ИАГИ Клиент\n\
+            \nКлиентское приложение для системы оптимизации раскроя плоских деталей с использованием гравитационной имитации.\n\
+                \nВерсия 2.0\
+                    \nПодключается к серверу ИАГИ через HTTP API\
+                    \nВключает визуализацию результатов и мониторинг процесса")

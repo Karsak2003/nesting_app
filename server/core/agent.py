@@ -12,7 +12,7 @@ class IAGIAgent:
         shape: Any, 
         position: Optional[Tuple[float, float]] = None, 
         angle: float = 0.0, 
-        priority: int = 1
+        priority: int = 1,
     ):
         """
         Инициализация ИАГИ агента
@@ -47,7 +47,9 @@ class IAGIAgent:
         self.min_gap = 0.0
         
         # Параметры для локальной релаксации
-        self.perception_radius = 100.0  # мм
+        bbox = shape.get_bounding_box()
+        max_dimension = max(bbox[2] - bbox[0], bbox[3] - bbox[1])
+        self.perception_radius = max(500.0, max_dimension * 2.0)
         self.stagnation_counter = 0
         self.max_stagnation_steps = 100
         
