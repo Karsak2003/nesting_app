@@ -3,15 +3,17 @@ scipy
 shapely
 rtree
 matplotlib
-ezdxf 
-PyQt5 
-pyyaml 
-scikit-learn 
-tqdm 
-joblib 
+ezdxf
+PyQt5
+pyyaml
+scikit-learn
+tqdm
+joblib
+fastapi
+uvicorn
+python-multipart
+requests
 #pythonocc-core
-
-
 
 #k1-A201-teacher\администратор
 

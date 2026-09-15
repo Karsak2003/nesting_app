@@ -1,0 +1,24 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "log_level": "INFO"
+  },
+  "paths": {
+    "uploads": "./uploads",
+    "results": "./results",
+    "logs": "./logs"
+  },
+  "optimization": {
+    "default_profile": "medium_precision",
+    "default_algorithm": "sequential",
+    "default_time_limit": 300,
+    "default_min_gap": 0.5
+  },
+  "features": {
+    "enable_dxf": true,
+    "enable_step": false,
+    "enable_svg_export": true,
+    "enable_json_export": true
+  }
+}
